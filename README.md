@@ -114,7 +114,8 @@ To change **only** which profiles are available (no reconfigure):
 # or: ./install.sh  →  option 3) Select profiles only
 ```
 
-This rewrites `settings.json` and **reloads the OpenWebRX+ container** so the new profile set is live.
+This updates the profile list in `settings.json` and **reloads the OpenWebRX+ container**.  
+Device settings tuned in the web UI (**PPM, gain, schedule, always-on, …**) are **kept**; only the profile set changes. Use `apply-presets.py --replace-device` only if you want a full preset reset.
 
 Controls: **↑/↓** move, **Space** toggle, **a** all, **n** none, **Enter** confirm, **q** cancel.  
 Profiles are listed by frequency; selected rows use a brighter color than unselected.

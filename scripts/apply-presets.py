@@ -87,6 +87,76 @@ def profile_names(sdrs: dict) -> list:
     return names
 
 
+# Device keys tuned in the OpenWebRX UI — keep them across profile re-applies.
+DEVICE_PRESERVE_KEYS = (
+    "name",
+    "ppm",
+    "rf_gain",
+    "gain",
+    "direct_sampling",
+    "always-on",
+    "services",
+    "scheduler",
+    "port",
+    "rtltcp_compat",
+    "lfo_offset",
+    "antenna",
+    "device",
+    "waterfall_levels",
+    "waterfall_min_level",
+    "waterfall_max_level",
+    "samp_rate",
+    "center_freq",
+)
+
+
+def find_existing_device(existing_sdrs: dict, key: str, preset_dev: dict) -> Optional[dict]:
+    if not isinstance(existing_sdrs, dict):
+        return None
+    if isinstance(existing_sdrs.get(key), dict):
+        return existing_sdrs[key]
+    preset_type = preset_dev.get("type")
+    if not preset_type:
+        return None
+    for ed in existing_sdrs.values():
+        if isinstance(ed, dict) and ed.get("type") == preset_type:
+            return ed
+    return None
+
+
+def clean_scheduler(device: dict, profile_ids: set[str]) -> None:
+    sched = device.get("scheduler")
+    if not isinstance(sched, dict):
+        return
+    schedule = sched.get("schedule")
+    if not isinstance(schedule, dict):
+        return
+    cleaned = {t: p for t, p in schedule.items() if p in profile_ids}
+    if cleaned:
+        sched["schedule"] = cleaned
+        device["scheduler"] = sched
+    else:
+        device.pop("scheduler", None)
+
+
+def merge_device(preset_dev: dict, existing_dev: Optional[dict], replace_device: bool) -> dict:
+    entry = dict(preset_dev)
+    entry["enabled"] = True
+    profiles = preset_dev.get("profiles") if isinstance(preset_dev.get("profiles"), dict) else {}
+    entry["profiles"] = profiles
+    if replace_device or not isinstance(existing_dev, dict):
+        clean_scheduler(entry, set(profiles.keys()))
+        return entry
+
+    for k in DEVICE_PRESERVE_KEYS:
+        if k in existing_dev:
+            entry[k] = existing_dev[k]
+    # Profiles always come from the (filtered) preset
+    entry["profiles"] = profiles
+    clean_scheduler(entry, set(profiles.keys()))
+    return entry
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--var-dir", required=True, help="Host path mapped to /var/lib/openwebrx")
@@ -94,6 +164,11 @@ def main() -> int:
     ap.add_argument(
         "--background",
         help="Optional background.json (defaults to <preset-dir>/background.json)",
+    )
+    ap.add_argument(
+        "--replace-device",
+        action="store_true",
+        help="Overwrite device settings/schedule from preset (default: preserve live UI settings)",
     )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
@@ -115,21 +190,25 @@ def main() -> int:
         settings = {"version": 8}
         created = True
         old_keys = []
+        old_sdrs: dict = {}
     else:
         settings = load_json(settings_path)
         if not isinstance(settings, dict):
             print(f"error: invalid settings at {settings_path}", file=sys.stderr)
             return 1
         created = False
-        old = settings.get("sdrs") if isinstance(settings.get("sdrs"), dict) else {}
-        old_keys = list(old.keys())
+        old_sdrs = settings.get("sdrs") if isinstance(settings.get("sdrs"), dict) else {}
+        old_keys = list(old_sdrs.keys())
 
     new_sdrs = {}
+    preserved = []
     for key, dev in preset.items():
         if not isinstance(dev, dict):
             continue
-        entry = dict(dev)
-        entry["enabled"] = True
+        existing_dev = find_existing_device(old_sdrs, key, dev)
+        entry = merge_device(dev, existing_dev, replace_device=args.replace_device or created)
+        if existing_dev and not args.replace_device and not created:
+            preserved.append(key)
         new_sdrs[key] = entry
 
     if not new_sdrs:
@@ -138,7 +217,7 @@ def main() -> int:
 
     settings["sdrs"] = new_sdrs
 
-    # Optional background decoding
+    # Optional background decoding — only seed keys that are not already set
     if args.background:
         background_path = Path(args.background)
     else:
@@ -148,6 +227,8 @@ def main() -> int:
         background = json.loads(background_path.read_text(encoding="utf-8"))
         if isinstance(background, dict):
             for k, v in background.items():
+                if k in settings and not args.replace_device and not created:
+                    continue
                 settings[k] = v
                 bg_keys.append(k)
 
@@ -174,6 +255,10 @@ def main() -> int:
     dropped = [k for k in old_keys if k not in new_sdrs]
     if dropped:
         print("removed devices: " + ", ".join(dropped))
+    if preserved:
+        print("preserved device settings/schedule for: " + ", ".join(preserved))
+    elif not created and not args.replace_device:
+        print("note: no prior matching device — seeded from preset")
     print("devices: " + ", ".join(sorted(new_sdrs.keys())))
     print(f"profiles ({len(names)}): " + ", ".join(names))
     if bg_keys:

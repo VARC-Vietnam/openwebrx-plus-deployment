@@ -372,6 +372,15 @@ fi
 
 detect_existing_install
 
+# Prefer existing .env values as defaults for re-runs / reconfigure
+if [[ -f "$ROOT/.env" ]]; then
+  # shellcheck disable=SC1091
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT/.env"
+  set +a
+fi
+
 if [[ "$INSTALL_MODE" == "fresh" && "$EXISTING" == true ]]; then
   step "0" "Existing installation"
   info "Repo: ${ROOT}"
@@ -631,9 +640,11 @@ step "3/10" "Select supported device"
 echo "  1) RTL-SDR          (rtl_sdr — bind /dev/bus/usb, optional rtl_tcp)"
 echo "  2) RX-888 / SDDC    (sddc_soapy — bind /dev/bus/usb)"
 echo
+DEVICE_DEFAULT="1"
+[[ "${OWRX_DEVICE:-}" == "rx888" ]] && DEVICE_DEFAULT="2"
 DEVICE_CHOICE=""
 while [[ -z "$DEVICE_CHOICE" ]]; do
-  prompt DEVICE_CHOICE "Choose device [1-2]" "1"
+  prompt DEVICE_CHOICE "Choose device [1-2]" "$DEVICE_DEFAULT"
   case "$DEVICE_CHOICE" in
     1) OWRX_DEVICE=rtl_sdr; DEVICE_LABEL="RTL-SDR" ;;
     2) OWRX_DEVICE=rx888;   DEVICE_LABEL="RX-888" ;;
@@ -654,10 +665,6 @@ if [[ ! -f "$PRESET_FULL" ]]; then
 fi
 # Restore previous checks (from last install / profiles apply)
 PREV_SELECTED=""
-if [[ -f "$ROOT/.env" ]]; then
-  # shellcheck disable=SC1091
-  set -a; source "$ROOT/.env"; set +a
-fi
 _prev_dir="${OWRX_DATA_DIR:-/opt/owrx-docker}"
 if [[ -f "${_prev_dir}/presets/SELECTED_PROFILES.txt" ]]; then
   PREV_SELECTED="${_prev_dir}/presets/SELECTED_PROFILES.txt"
@@ -683,9 +690,11 @@ step "5/11" "Docker image"
 echo "  1) slechev/openwebrxplus          (standard)"
 echo "  2) slechev/openwebrxplus-softmbe  (includes SoftMBE digital voice)"
 echo
+IMAGE_DEFAULT="1"
+[[ "${OWRX_IMAGE:-}" == *softmbe* ]] && IMAGE_DEFAULT="2"
 IMAGE_CHOICE=""
 while [[ -z "$IMAGE_CHOICE" ]]; do
-  prompt IMAGE_CHOICE "Choose image [1-2]" "1"
+  prompt IMAGE_CHOICE "Choose image [1-2]" "$IMAGE_DEFAULT"
   case "$IMAGE_CHOICE" in
     1) OWRX_IMAGE="slechev/openwebrxplus:latest" ;;
     2) OWRX_IMAGE="slechev/openwebrxplus-softmbe:latest" ;;
@@ -698,18 +707,18 @@ sleep 0.6
 # ---------- admin / presets ----------
 step "6/11" "Admin, timezone, ports, data"
 DEFAULT_TZ="$(detect_debian_tz)"
-prompt OWRX_CONTAINER_NAME "Container name" "openwebrxplus"
-prompt OWRX_PORT "Web UI host port" "8073"
+prompt OWRX_CONTAINER_NAME "Container name" "${OWRX_CONTAINER_NAME:-openwebrxplus}"
+prompt OWRX_PORT "Web UI host port" "${OWRX_PORT:-8073}"
 prompt TZ "Timezone (IANA)" "${TZ:-$DEFAULT_TZ}"
-prompt OPENWEBRX_ADMIN_USER "Admin username" "admin"
-prompt_secret OPENWEBRX_ADMIN_PASSWORD "Admin password" "changeme"
+prompt OPENWEBRX_ADMIN_USER "Admin username" "${OPENWEBRX_ADMIN_USER:-admin}"
+prompt_secret OPENWEBRX_ADMIN_PASSWORD "Admin password" "${OPENWEBRX_ADMIN_PASSWORD:-changeme}"
 if [[ -z "$OPENWEBRX_ADMIN_PASSWORD" ]]; then
   err "Admin password cannot be empty."
   exit 1
 fi
 
 # Official OWRX+ docs use /opt/owrx-docker on Debian servers
-DEFAULT_DATA="/opt/owrx-docker"
+DEFAULT_DATA="${OWRX_DATA_DIR:-/opt/owrx-docker}"
 prompt OWRX_DATA_DIR "Persistent data directory" "$DEFAULT_DATA"
 # Expand ~ if present
 OWRX_DATA_DIR="${OWRX_DATA_DIR/#\~/$HOME}"
