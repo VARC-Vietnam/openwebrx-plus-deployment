@@ -211,6 +211,15 @@
         "start_mod": "packet",
         "tuning_step": 1000,
         "rf_gain": 49.6
+      },
+      "hamvn_meshtastic_923": {
+        "name": "HAMVN Meshtastic 923",
+        "center_freq": 918375000,
+        "samp_rate": 2400000,
+        "start_freq": 918375000,
+        "start_mod": "meshtastic",
+        "tuning_step": 1000,
+        "rf_gain": 49.6
       }
     }
   }
