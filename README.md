@@ -106,13 +106,13 @@ lsusb | grep -iE 'realtek|cypress|0bda|04b4'
 
 ## Applying profiles
 
-Presets land in `$OWRX_DATA_DIR/presets/`. Live config is under `$OWRX_DATA_DIR/var/`. Prefer the web UI:
+`install.sh` and `./scripts/apply-presets.sh` write presets into live `settings.json` and **remove Airspy HF+ / SDRPlay** defaults so only the selected device (RTL-SDR or RX-888) remains.
 
-1. Admin → **Settings → SDR Devices and Profiles**
-2. Enable `rtl_sdr` or add `sddc_soapy` for RX-888
-3. Use `presets/*.json` as a band/profile reference
+```bash
+./scripts/apply-presets.sh          # or: ./install.sh → option 3
+```
 
-RTL-SDR Blog **v4**: turn **off** direct sampling on VHF/UHF profiles.
+RTL-SDR Blog **v4**: turn **off** direct sampling on VHF/UHF profiles if needed.
 
 ## Update
 

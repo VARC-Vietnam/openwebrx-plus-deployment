@@ -355,21 +355,9 @@ if [[ "$INSTALL_MODE" == "presets" ]]; then
     err "No .env — cannot refresh presets. Choose reconfigure (2) instead."
     exit 1
   fi
-  # shellcheck disable=SC1091
-  set -a; source "$ROOT/.env"; set +a
-  DEVICE="${OWRX_DEVICE:-rtl_sdr}"
-  PRESET_SRC="${ROOT}/presets/${DEVICE}/sdrs.json"
-  PRESET_DST="${OWRX_DATA_DIR}/presets"
-  if [[ ! -f "$PRESET_SRC" ]]; then
-    err "No preset file: ${PRESET_SRC}"
-    exit 1
-  fi
-  sudo mkdir -p "$PRESET_DST"
-  sudo cp "$PRESET_SRC" "${PRESET_DST}/sdrs.${DEVICE}.json"
-  sudo cp "$PRESET_SRC" "${PRESET_DST}/sdrs.json"
-  sudo chown -R "${USER}:${USER}" "${OWRX_DATA_DIR}/presets" 2>/dev/null || true
-  ok "Presets refreshed → ${PRESET_DST}/sdrs.json"
-  info "Apply in Admin → Settings → SDR Devices (or merge from that file)."
+  bold "Refreshing presets (RTL/RX-888 only — drop Airspy/SDRPlay)"
+  "$ROOT/scripts/apply-presets.sh"
+  ok "Presets applied to live settings."
   exit 0
 fi
 
@@ -681,20 +669,26 @@ fi
 ok "Data directories ready under ${OWRX_DATA_DIR}"
 
 # ---------- seed profiles ----------
-bold "Seeding device profile preset..."
+bold "Seeding device profiles (no Airspy / SDRPlay)..."
 PRESET_SRC="${ROOT}/presets/${OWRX_DEVICE}/sdrs.json"
 PRESET_DST="${OWRX_DATA_DIR}/presets/sdrs.${OWRX_DEVICE}.json"
 if [[ -f "$PRESET_SRC" ]]; then
   cp "$PRESET_SRC" "$PRESET_DST"
   cp "$PRESET_SRC" "${OWRX_DATA_DIR}/presets/sdrs.json"
-  ok "Preset copied → ${PRESET_DST}"
-  info "After first start, import/apply profiles via Settings → SDR Devices,"
-  info "or merge ${PRESET_DST} into the live settings (see README)."
+  # Write into live settings.json before/without Airspy+SDRPlay defaults
+  if command -v python3 >/dev/null 2>&1; then
+    python3 "$ROOT/scripts/apply-presets.py" \
+      --var-dir "${OWRX_DATA_DIR}/var" \
+      --preset "$PRESET_SRC" \
+      && ok "Live settings seeded (selected device only)"
+  else
+    ok "Preset copied → ${PRESET_DST}"
+    warn "python3 missing — could not rewrite settings.json yet"
+  fi
 else
   warn "No preset found at ${PRESET_SRC}"
 fi
 
-# Optional: drop a marker so users know which device was chosen
 cat > "${OWRX_DATA_DIR}/presets/SELECTED_DEVICE.txt" <<EOF
 device=${OWRX_DEVICE}
 label=${DEVICE_LABEL}
@@ -818,12 +812,23 @@ if confirm "Pull image and start OpenWebRX+ now?" y; then
     run_quiet "Starting OpenWebRX+" "Container started" \
       $COMPOSE up -d --quiet-pull
   fi
+
+  # OWRX may recreate default Airspy/SDRPlay on first boot — scrub again & restart
+  if [[ -f "$PRESET_SRC" ]] && command -v python3 >/dev/null 2>&1; then
+    sleep 3
+    python3 "$ROOT/scripts/apply-presets.py" \
+      --var-dir "${OWRX_DATA_DIR}/var" \
+      --preset "$PRESET_SRC" >/dev/null 2>&1 || true
+    $DOCKER restart "${OWRX_CONTAINER_NAME}" >/dev/null 2>&1 || true
+    ok "Profiles locked to ${DEVICE_LABEL} (Airspy/SDRPlay removed)"
+  fi
+
   echo
   ok "Ready → http://localhost:${OWRX_PORT}  (user: ${OPENWEBRX_ADMIN_USER})"
   info "Logs: $COMPOSE logs -f openwebrx"
   echo
   bold "Next"
-  echo "  Admin → Settings → SDR Devices  (preset: ${PRESET_DST})"
+  echo "  Profiles: HAMVN / HF FT8-FT4 / ISS only (no Airspy+, no SDRPlay)"
   if [[ "$OWRX_DEVICE" == "rtl_sdr" && "$ENABLE_RTL_TCP" == true ]]; then
     echo "  rtl_tcp host port: ${FORWARD_RTL_TCP_EXTERNAL} (internal ${FORWARD_LOCALPORT_INTERNAL})"
   fi
