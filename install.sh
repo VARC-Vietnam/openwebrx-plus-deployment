@@ -68,8 +68,16 @@ need_cmd() {
   }
 }
 
-# ---------- quiet progress (spinner) ----------
+# ---------- quiet Ctrl+C / progress ----------
 SPIN_PID=""
+on_interrupt() {
+  spin_clear 2>/dev/null || true
+  printf '\033[?25h' 2>/dev/null || true
+  echo
+  warn "Cancelled."
+  exit 130
+}
+trap on_interrupt INT
 trap 'spin_clear' EXIT
 
 spin_start() {
@@ -417,10 +425,20 @@ run_profiles_only() {
   echo
   sleep 0.3
 
+  local initial_args=()
+  local prev="${OWRX_DATA_DIR}/presets/SELECTED_PROFILES.txt"
+  local prev_json="${OWRX_DATA_DIR}/presets/sdrs.selected.json"
+  if [[ -f "$prev" ]]; then
+    initial_args=(--initial-selected "$prev")
+  elif [[ -f "$prev_json" ]]; then
+    initial_args=(--initial-selected "$prev_json")
+  fi
+
   python3 "$ROOT/scripts/select-profiles.py" \
     --preset "$preset_full" \
     --output "$filtered" \
-    --selected-file "$selected_ids"
+    --selected-file "$selected_ids" \
+    "${initial_args[@]}"
 
   step "2/2" "Apply selected profiles"
   sudo mkdir -p "${OWRX_DATA_DIR}/presets" "$var_dir"
@@ -430,14 +448,16 @@ run_profiles_only() {
   sudo cp "$selected_ids" "${OWRX_DATA_DIR}/presets/SELECTED_PROFILES.txt"
   sudo chown -R "${USER}:${USER}" "${OWRX_DATA_DIR}/presets" 2>/dev/null || true
 
-  local docker_bin="" compose_bin="" was_running=false
-  if docker_bin="$(resolve_docker 2>/dev/null)"; then
+  local docker_bin="" compose_bin=""
+  docker_bin="$(resolve_docker 2>/dev/null || true)"
+  if [[ -n "$docker_bin" ]]; then
     compose_bin="$(resolve_compose "$docker_bin" 2>/dev/null || true)"
-    if $docker_bin ps --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
-      was_running=true
-      run_quiet "Stopping ${OWRX_CONTAINER_NAME}" "Stopped" \
-        $docker_bin stop "${OWRX_CONTAINER_NAME}"
-    fi
+  fi
+
+  # Stop first so settings.json is not overwritten while OWRX is running
+  if [[ -n "$docker_bin" ]] && $docker_bin ps --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
+    run_quiet "Stopping ${OWRX_CONTAINER_NAME} for settings reload" "Stopped" \
+      $docker_bin stop "${OWRX_CONTAINER_NAME}"
   fi
 
   local bg_args=()
@@ -455,19 +475,24 @@ run_profiles_only() {
       "${bg_args[@]}" >/dev/null 2>&1 || true
   fi
 
-  if [[ "$was_running" == true && -n "$docker_bin" ]]; then
+  # Always reload container so new profiles are live
+  if [[ -n "$docker_bin" ]]; then
     if [[ -n "$compose_bin" && -f "$ROOT/docker-compose.yml" ]]; then
-      run_quiet "Starting OpenWebRX+" "Container started" \
-        $compose_bin up -d --quiet-pull
+      run_quiet "Reloading OpenWebRX+ container" "Container reloaded" \
+        $compose_bin up -d --force-recreate --quiet-pull
+    elif $docker_bin ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
+      run_quiet "Reloading ${OWRX_CONTAINER_NAME}" "Container reloaded" \
+        $docker_bin restart "${OWRX_CONTAINER_NAME}"
     else
-      run_quiet "Starting ${OWRX_CONTAINER_NAME}" "Container started" \
-        $docker_bin start "${OWRX_CONTAINER_NAME}"
+      warn "Container ${OWRX_CONTAINER_NAME} not found — start with ./scripts/start.sh"
     fi
+  else
+    warn "Docker not reachable — settings written; restart the container manually."
   fi
 
   rm -f "$filtered" "$selected_ids"
   echo
-  ok "Profiles updated only — no other install settings changed."
+  ok "Profiles updated and container reloaded."
   info "Web UI: http://localhost:${OWRX_PORT:-8073}"
 }
 
@@ -613,10 +638,28 @@ if [[ ! -f "$PRESET_FULL" ]]; then
   err "No preset file: ${PRESET_FULL}"
   exit 1
 fi
+# Restore previous checks (from last install / profiles apply)
+PREV_SELECTED=""
+if [[ -f "$ROOT/.env" ]]; then
+  # shellcheck disable=SC1091
+  set -a; source "$ROOT/.env"; set +a
+fi
+_prev_dir="${OWRX_DATA_DIR:-/opt/owrx-docker}"
+if [[ -f "${_prev_dir}/presets/SELECTED_PROFILES.txt" ]]; then
+  PREV_SELECTED="${_prev_dir}/presets/SELECTED_PROFILES.txt"
+elif [[ -f "${_prev_dir}/presets/sdrs.selected.json" ]]; then
+  PREV_SELECTED="${_prev_dir}/presets/sdrs.selected.json"
+fi
+INITIAL_ARGS=()
+if [[ -n "$PREV_SELECTED" ]]; then
+  INITIAL_ARGS=(--initial-selected "$PREV_SELECTED")
+  info "Restoring previous profile checks from ${_prev_dir}/presets/"
+fi
 python3 "$ROOT/scripts/select-profiles.py" \
   --preset "$PRESET_FULL" \
   --output "$SELECTED_PRESET" \
-  --selected-file "$SELECTED_IDS_FILE"
+  --selected-file "$SELECTED_IDS_FILE" \
+  "${INITIAL_ARGS[@]}"
 # select-profiles clears the screen; restore step header briefly
 ok "Profile selection saved"
 sleep 0.8

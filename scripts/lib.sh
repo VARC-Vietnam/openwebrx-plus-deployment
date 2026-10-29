@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # Shared helpers for scripts/
 
+# Soft Ctrl+C: exit 130 with a short message, no shell error dump.
+quiet_interrupt_trap() {
+  on_interrupt() {
+    echo
+    echo "Cancelled."
+    exit 130
+  }
+  trap on_interrupt INT
+}
+
 resolve_compose() {
   local docker_bin="${1:-docker}"
   if $docker_bin compose version >/dev/null 2>&1; then

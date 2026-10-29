@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib.sh"
+quiet_interrupt_trap
 
 SELECT_ALL=false
 if [[ "${1:-}" == "--all" ]]; then
@@ -38,6 +39,15 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
+INITIAL_ARGS=()
+PREV_SELECTED="${OWRX_DATA_DIR}/presets/SELECTED_PROFILES.txt"
+PREV_JSON="${OWRX_DATA_DIR}/presets/sdrs.selected.json"
+if [[ -f "$PREV_SELECTED" ]]; then
+  INITIAL_ARGS=(--initial-selected "$PREV_SELECTED")
+elif [[ -f "$PREV_JSON" ]]; then
+  INITIAL_ARGS=(--initial-selected "$PREV_JSON")
+fi
+
 if [[ "$SELECT_ALL" == true ]]; then
   python3 "$ROOT/scripts/select-profiles.py" \
     --preset "$PRESET_FULL" \
@@ -48,7 +58,8 @@ else
   python3 "$ROOT/scripts/select-profiles.py" \
     --preset "$PRESET_FULL" \
     --output "$FILTERED" \
-    --selected-file "$SELECTED_IDS"
+    --selected-file "$SELECTED_IDS" \
+    "${INITIAL_ARGS[@]}"
 fi
 
 # Data dir is often root/container-owned after first start
@@ -61,12 +72,11 @@ sudo chown -R "${USER}:${USER}" "${OWRX_DATA_DIR}/presets" 2>/dev/null || true
 
 DOCKER=""
 COMPOSE=""
-WAS_RUNNING=false
-if DOCKER="$(resolve_docker 2>/dev/null)"; then
+DOCKER="$(resolve_docker 2>/dev/null || true)"
+if [[ -n "$DOCKER" ]]; then
   COMPOSE="$(resolve_compose "$DOCKER" 2>/dev/null || true)"
   if $DOCKER ps --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
-    WAS_RUNNING=true
-    echo "Stopping ${OWRX_CONTAINER_NAME} to rewrite settings..."
+    echo "Stopping ${OWRX_CONTAINER_NAME} for settings reload..."
     $DOCKER stop "${OWRX_CONTAINER_NAME}" >/dev/null
   fi
 fi
@@ -88,13 +98,18 @@ if [[ -d "${OWRX_DATA_DIR}/etc" ]]; then
     "${BG_ARGS[@]}" 2>/dev/null || true
 fi
 
-if [[ "$WAS_RUNNING" == true && -n "$DOCKER" ]]; then
-  echo "Starting ${OWRX_CONTAINER_NAME}..."
+# Always reload so new profiles are live in OpenWebRX+
+if [[ -n "$DOCKER" ]]; then
+  echo "Reloading container..."
   if [[ -n "$COMPOSE" && -f "$ROOT/docker-compose.yml" ]]; then
-    $COMPOSE up -d --quiet-pull >/dev/null
+    $COMPOSE up -d --force-recreate --quiet-pull >/dev/null
+  elif $DOCKER ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
+    $DOCKER restart "${OWRX_CONTAINER_NAME}" >/dev/null
   else
-    $DOCKER start "${OWRX_CONTAINER_NAME}" >/dev/null
+    echo "Container ${OWRX_CONTAINER_NAME} not found — start with ./scripts/start.sh"
   fi
+else
+  echo "Docker not reachable — restart the container manually after settings write."
 fi
 
-echo "Done — selected profiles applied; Airspy/SDRPlay removed."
+echo "Done — profiles applied and container reloaded."

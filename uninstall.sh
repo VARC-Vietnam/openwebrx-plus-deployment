@@ -30,6 +30,14 @@ confirm() {
 }
 
 SPIN_PID=""
+on_interrupt() {
+  spin_clear 2>/dev/null || true
+  printf '\033[?25h' 2>/dev/null || true
+  echo
+  warn "Cancelled."
+  exit 130
+}
+trap on_interrupt INT
 trap 'spin_clear' EXIT
 
 spin_start() {

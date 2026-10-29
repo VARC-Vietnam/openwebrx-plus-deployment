@@ -47,13 +47,45 @@ def format_freq(hz: float) -> str:
     return f"{hz:8.0f} Hz"
 
 
-def sorted_profile_items(profiles: dict) -> list[list]:
-    """Build [pid, name, selected, freq_hz] sorted by frequency ascending."""
+def load_previous_selection(path: Path) -> set[str] | None:
+    """Load previously selected profile ids from SELECTED_PROFILES.txt or filtered JSON."""
+    if not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8").strip()
+    if not text:
+        return None
+    # JSON: filtered sdrs.selected.json (device → profiles)
+    if text.startswith("{"):
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+        ids: set[str] = set()
+        if isinstance(data, dict):
+            for device in data.values():
+                if not isinstance(device, dict):
+                    continue
+                profiles = device.get("profiles") or {}
+                if isinstance(profiles, dict):
+                    ids.update(profiles.keys())
+        return ids or None
+    # Plain text: one profile id per line
+    ids = {line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("#")}
+    return ids or None
+
+
+def sorted_profile_items(profiles: dict, initial: set[str] | None = None) -> list[list]:
+    """Build [pid, name, selected, freq_hz] sorted by frequency ascending.
+
+    If initial is None (first install), all profiles start checked.
+    If initial is a set (re-run), only those ids start checked; others stay off.
+    """
     items = []
     for pid, p in profiles.items():
         name = str((p or {}).get("name") or pid)
         freq = profile_freq_hz(p or {})
-        items.append([pid, name, True, freq])
+        selected = True if initial is None else (pid in initial)
+        items.append([pid, name, selected, freq])
     items.sort(key=lambda row: (row[3], row[1].lower()))
     return items
 
@@ -167,12 +199,12 @@ def interactive_select_curses(stdscr, items: list[list]) -> list[str] | None:
             return chosen
 
 
-def interactive_select(profiles: dict) -> list[str]:
-    items = sorted_profile_items(profiles)
+def interactive_select(profiles: dict, initial: set[str] | None = None) -> list[str]:
+    items = sorted_profile_items(profiles, initial)
 
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        # Non-TTY fallback: keep all (frequency order)
-        return [pid for pid, _n, _on, _f in items]
+        # Non-TTY fallback: keep currently selected (or all if first run)
+        return [pid for pid, _n, on, _f in items if on]
 
     def _wrap(stdscr):
         return interactive_select_curses(stdscr, items)
@@ -183,7 +215,8 @@ def interactive_select(profiles: dict) -> list[str]:
         result = None
 
     if result is None:
-        raise SystemExit("Cancelled.")
+        print("Cancelled.", file=sys.stderr)
+        raise SystemExit(130)
     return result
 
 
@@ -225,6 +258,10 @@ def main() -> int:
         help="Also write newline-separated selected profile ids",
     )
     ap.add_argument(
+        "--initial-selected",
+        help="Previous SELECTED_PROFILES.txt or sdrs.selected.json — pre-check only those",
+    )
+    ap.add_argument(
         "--noninteractive",
         action="store_true",
         help="Keep all profiles (no UI)",
@@ -243,6 +280,10 @@ def main() -> int:
     data = json.loads(preset_path.read_text(encoding="utf-8"))
     _dev_id, _device, profiles = load_preset(preset_path)
 
+    initial: set[str] | None = None
+    if args.initial_selected:
+        initial = load_previous_selection(Path(args.initial_selected))
+
     if args.only:
         selected = [s.strip() for s in args.only.split(",") if s.strip()]
         missing = [s for s in selected if s not in profiles]
@@ -250,9 +291,13 @@ def main() -> int:
             print(f"error: unknown profile ids: {', '.join(missing)}", file=sys.stderr)
             return 1
     elif args.noninteractive:
-        selected = list(profiles.keys())
+        # Honor previous selection when present; otherwise keep all
+        if initial is not None:
+            selected = [pid for pid in profiles if pid in initial] or list(profiles.keys())
+        else:
+            selected = list(profiles.keys())
     else:
-        selected = interactive_select(profiles)
+        selected = interactive_select(profiles, initial)
 
     selected_set = set(selected)
     filtered = filter_preset(data, selected_set)
@@ -273,4 +318,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        # Quiet halt: no traceback
+        print("\nCancelled.", file=sys.stderr)
+        raise SystemExit(130) from None
