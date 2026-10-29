@@ -1,7 +1,8 @@
 # OpenWebRX+ SondeHub reporter hotfix (mounted over the image file).
-# Fixes: TypeError isValidValue() takes 2 positional arguments but 3 were given
-# Upstream fix: missing `self` on isValidValue (openwebrx 2b2be92b, 2026-10-28).
-# Remove this mount once slechev/openwebrxplus ships a build newer than that fix.
+# Fixes:
+#   1) TypeError isValidValue() — missing `self` (upstream 2b2be92b, 2026-10-28)
+#   2) AttributeError selfSpotCounter — counter used but never created in __init__
+# Remove this mount once slechev/openwebrxplus ships a build with both fixes.
 #
 import gzip
 import json
@@ -198,6 +199,8 @@ class SondehubReporter(FilteredReporter):
         metrics.addMetric("sondehub.uploads", self.uploadCounter)
         self.errorCounter = CounterMetric()
         metrics.addMetric("sondehub.errors", self.errorCounter)
+        self.selfSpotCounter = CounterMetric()
+        metrics.addMetric("sondehub.self_spots", self.selfSpotCounter)
         self.selfUploadCounter = CounterMetric()
         metrics.addMetric("sondehub.self_uploads", self.selfUploadCounter)
         self.selfErrorCounter = CounterMetric()
