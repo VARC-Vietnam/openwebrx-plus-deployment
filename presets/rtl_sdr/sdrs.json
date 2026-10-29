@@ -236,6 +236,46 @@
         "tuning_step": 1000,
         "rf_gain": 49.6,
         "direct_sampling": 0
+      },
+      "fm_90": {
+        "name": "FM 90.0",
+        "center_freq": 90000000,
+        "samp_rate": 2400000,
+        "start_freq": 90000000,
+        "start_mod": "nfm",
+        "tuning_step": 100000,
+        "rf_gain": 49.6,
+        "direct_sampling": 0
+      },
+      "fm_91": {
+        "name": "FM 91.0",
+        "center_freq": 91000000,
+        "samp_rate": 2400000,
+        "start_freq": 91000000,
+        "start_mod": "nfm",
+        "tuning_step": 100000,
+        "rf_gain": 49.6,
+        "direct_sampling": 0
+      },
+      "fm_1027": {
+        "name": "FM 102.7",
+        "center_freq": 102700000,
+        "samp_rate": 2400000,
+        "start_freq": 102700000,
+        "start_mod": "wfm",
+        "tuning_step": 100000,
+        "rf_gain": 49.6,
+        "direct_sampling": 0
+      },
+      "airband_1251": {
+        "name": "Airband 125.100",
+        "center_freq": 125100000,
+        "samp_rate": 2400000,
+        "start_freq": 125100000,
+        "start_mod": "am",
+        "tuning_step": 25000,
+        "rf_gain": 49.6,
+        "direct_sampling": 0
       }
     }
   }
