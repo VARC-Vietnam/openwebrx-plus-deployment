@@ -55,6 +55,17 @@ Sign in with the admin user/password you set in the installer.
 | `./scripts/update.sh` | Pull latest image & recreate |
 | `./scripts/status.sh` | Status + USB scan |
 | `./scripts/detect-usb.sh` | List plugged SDR USB devices |
+| `./uninstall.sh` | Remove OpenWebRX+ + Docker (keeps blacklist/udev) |
+
+## Uninstall
+
+```bash
+./uninstall.sh
+```
+
+Stops containers, removes OpenWebRX+/autoheal images, deletes generated `.env` / `docker-compose.yml`, optionally wipes `/opt/owrx-docker`, and can purge `docker.io` / `docker-compose`.
+
+**Kept:** `/etc/modprobe.d/owrx-blacklist.conf`, `/etc/udev/rules.d/99-sdr-devices.rules`, and `plugdev` membership.
 
 ## Supported devices
 
