@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import curses
 import json
 import sys
 from pathlib import Path
@@ -23,53 +24,121 @@ def load_preset(path: Path) -> tuple[str, dict, dict]:
     return dev_id, device, profiles
 
 
-def render(items: list[tuple[str, str, bool]]) -> None:
-    # Clear screen for a single focused view
-    sys.stdout.write("\033[H\033[J")
-    print("==============================================")
-    print("  Select profiles to enable")
-    print("==============================================")
-    print()
-    print("  Toggle: enter number(s)  e.g. 1 3 5")
-    print("  a = all   n = none   Enter = confirm")
-    print()
-    for i, (_pid, name, on) in enumerate(items, start=1):
-        mark = "x" if on else " "
-        print(f"  [{mark}] {i:2d}) {name}")
-    print()
-    selected = sum(1 for *_, on in items if on)
-    print(f"  Selected: {selected}/{len(items)}")
-    print()
+def interactive_select_curses(stdscr, items: list[list]) -> list[str] | None:
+    """
+    items: list of [pid, name, selected:bool]
+    Returns list of selected pids, or None if cancelled.
+    """
+    curses.curs_set(0)
+    stdscr.keypad(True)
+    if curses.has_colors():
+        curses.start_color()
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_CYAN)  # cursor
+        curses.init_pair(2, curses.COLOR_GREEN, -1)  # checked
+        curses.init_pair(3, curses.COLOR_YELLOW, -1)  # header
+
+    cursor = 0
+    scroll = 0
+    status = ""
+
+    while True:
+        stdscr.erase()
+        height, width = stdscr.getmaxyx()
+        header_lines = 7
+        footer_lines = 3
+        list_h = max(1, height - header_lines - footer_lines)
+
+        # Keep cursor visible
+        if cursor < scroll:
+            scroll = cursor
+        elif cursor >= scroll + list_h:
+            scroll = cursor - list_h + 1
+
+        def put(y: int, x: int, text: str, attr=0) -> None:
+            if y < 0 or y >= height:
+                return
+            stdscr.addnstr(y, x, text, max(0, width - x - 1), attr)
+
+        put(0, 0, "=" * min(width - 1, 46), curses.color_pair(3) | curses.A_BOLD)
+        put(1, 0, "  Select profiles to enable", curses.color_pair(3) | curses.A_BOLD)
+        put(2, 0, "=" * min(width - 1, 46), curses.color_pair(3) | curses.A_BOLD)
+        put(4, 0, "  ↑/↓ move   Space toggle   a all   n none")
+        put(5, 0, "  Enter confirm   q cancel")
+
+        for row in range(list_h):
+            idx = scroll + row
+            if idx >= len(items):
+                break
+            _pid, name, on = items[idx]
+            mark = "x" if on else " "
+            line = f"  [{mark}] {idx + 1:2d}) {name}"
+            y = header_lines + row
+            if idx == cursor:
+                attr = curses.color_pair(1) | curses.A_BOLD
+            elif on:
+                attr = curses.color_pair(2)
+            else:
+                attr = 0
+            put(y, 0, line.ljust(min(width - 1, 60)), attr)
+
+        selected = sum(1 for *_, on in items if on)
+        put(height - 2, 0, f"  Selected: {selected}/{len(items)}   {status}")
+
+        stdscr.refresh()
+        key = stdscr.getch()
+        status = ""
+
+        if key in (curses.KEY_UP, ord("k")):
+            cursor = (cursor - 1) % len(items)
+        elif key in (curses.KEY_DOWN, ord("j")):
+            cursor = (cursor + 1) % len(items)
+        elif key in (curses.KEY_PPAGE,):
+            cursor = max(0, cursor - list_h)
+        elif key in (curses.KEY_NPAGE,):
+            cursor = min(len(items) - 1, cursor + list_h)
+        elif key in (curses.KEY_HOME,):
+            cursor = 0
+        elif key in (curses.KEY_END,):
+            cursor = len(items) - 1
+        elif key in (ord(" "), ord("x")):
+            items[cursor][2] = not items[cursor][2]
+        elif key in (ord("a"), ord("A")):
+            for item in items:
+                item[2] = True
+            status = "all on"
+        elif key in (ord("n"), ord("N")):
+            for item in items:
+                item[2] = False
+            status = "all off"
+        elif key in (ord("q"), 27):  # q or ESC
+            return None
+        elif key in (curses.KEY_ENTER, 10, 13):
+            chosen = [pid for pid, _name, on in items if on]
+            if not chosen:
+                status = "select at least one"
+                continue
+            return chosen
 
 
 def interactive_select(profiles: dict) -> list[str]:
-    items = [(pid, str((p or {}).get("name") or pid), True) for pid, p in profiles.items()]
-    while True:
-        render(items)
-        try:
-            raw = input("Toggle / confirm: ").strip()
-        except EOFError:
-            raw = ""
-        if raw == "":
-            chosen = [pid for pid, _n, on in items if on]
-            if not chosen:
-                print("Select at least one profile.")
-                input("Press Enter...")
-                continue
-            return chosen
-        if raw.lower() == "a":
-            items = [(pid, name, True) for pid, name, _ in items]
-            continue
-        if raw.lower() == "n":
-            items = [(pid, name, False) for pid, name, _ in items]
-            continue
-        for token in raw.replace(",", " ").split():
-            if not token.isdigit():
-                continue
-            idx = int(token) - 1
-            if 0 <= idx < len(items):
-                pid, name, on = items[idx]
-                items[idx] = (pid, name, not on)
+    items = [[pid, str((p or {}).get("name") or pid), True] for pid, p in profiles.items()]
+
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        # Non-TTY fallback: keep all
+        return [pid for pid, _n, _on in items]
+
+    def _wrap(stdscr):
+        return interactive_select_curses(stdscr, items)
+
+    try:
+        result = curses.wrapper(_wrap)
+    except curses.error:
+        result = None
+
+    if result is None:
+        raise SystemExit("Cancelled.")
+    return result
 
 
 def filter_preset(data: dict, selected: set[str]) -> dict:
@@ -144,7 +213,6 @@ def main() -> int:
     if args.selected_file:
         Path(args.selected_file).write_text("\n".join(selected) + "\n", encoding="utf-8")
 
-    # Summary on stderr so stdout stays clean if piped; we print to stdout for humans
     names = []
     for pid in selected:
         names.append(str((profiles.get(pid) or {}).get("name") or pid))

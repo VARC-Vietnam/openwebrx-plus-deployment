@@ -114,7 +114,7 @@ To change **only** which profiles are available (no reconfigure):
 # or: ./install.sh  →  option 3) Select profiles only
 ```
 
-Controls: type profile numbers to toggle (`1 3 5`), `a` = all, `n` = none, Enter = confirm.
+Controls: **↑/↓** move, **Space** toggle, **a** all, **n** none, **Enter** confirm, **q** cancel.
 
 ### Background FT8 (no browser required)
 
