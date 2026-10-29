@@ -70,15 +70,22 @@ sudo cp "$FILTERED" "${OWRX_DATA_DIR}/presets/sdrs.selected.json"
 sudo cp "$SELECTED_IDS" "${OWRX_DATA_DIR}/presets/SELECTED_PROFILES.txt"
 sudo chown -R "${USER}:${USER}" "${OWRX_DATA_DIR}/presets" 2>/dev/null || true
 
+# Cache sudo so resolve_docker can use "sudo docker" without a hidden prompt
+if ! sudo -n true 2>/dev/null; then
+  sudo -v </dev/tty >/dev/tty 2>/dev/tty || { echo "sudo authentication failed"; exit 1; }
+fi
+
 DOCKER=""
 COMPOSE=""
-DOCKER="$(resolve_docker 2>/dev/null || true)"
-if [[ -n "$DOCKER" ]]; then
-  COMPOSE="$(resolve_compose "$DOCKER" 2>/dev/null || true)"
-  if $DOCKER ps --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
-    echo "Stopping ${OWRX_CONTAINER_NAME} for settings reload..."
-    $DOCKER stop "${OWRX_CONTAINER_NAME}" >/dev/null
-  fi
+if ! DOCKER="$(resolve_docker)"; then
+  echo "Docker not reachable (try: sudo systemctl start docker)"
+  exit 1
+fi
+COMPOSE="$(resolve_compose "$DOCKER" || true)"
+
+if $DOCKER ps --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
+  echo "Stopping ${OWRX_CONTAINER_NAME} for settings reload..."
+  $DOCKER stop "${OWRX_CONTAINER_NAME}" >/dev/null
 fi
 
 echo "Applying selected profiles → ${VAR_DIR}/settings.json"
@@ -98,18 +105,14 @@ if [[ -d "${OWRX_DATA_DIR}/etc" ]]; then
     "${BG_ARGS[@]}" 2>/dev/null || true
 fi
 
-# Always reload so new profiles are live in OpenWebRX+
-if [[ -n "$DOCKER" ]]; then
-  echo "Reloading container..."
-  if [[ -n "$COMPOSE" && -f "$ROOT/docker-compose.yml" ]]; then
-    $COMPOSE up -d --force-recreate --quiet-pull >/dev/null
-  elif $DOCKER ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
-    $DOCKER restart "${OWRX_CONTAINER_NAME}" >/dev/null
-  else
-    echo "Container ${OWRX_CONTAINER_NAME} not found — start with ./scripts/start.sh"
-  fi
+echo "Reloading container..."
+if [[ -n "$COMPOSE" && -f "$ROOT/docker-compose.yml" ]]; then
+  $COMPOSE up -d --force-recreate --quiet-pull >/dev/null
+elif $DOCKER ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
+  $DOCKER restart "${OWRX_CONTAINER_NAME}" >/dev/null
 else
-  echo "Docker not reachable — restart the container manually after settings write."
+  echo "Container ${OWRX_CONTAINER_NAME} not found — start with ./scripts/start.sh"
+  exit 1
 fi
 
 echo "Done — profiles applied and container reloaded."

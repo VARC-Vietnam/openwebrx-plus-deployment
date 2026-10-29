@@ -262,6 +262,16 @@ install_docker_debian() {
   ok "Docker ready."
 }
 
+resolve_docker() {
+  if docker info >/dev/null 2>&1; then
+    echo "docker"
+  elif sudo docker info >/dev/null 2>&1; then
+    echo "sudo docker"
+  else
+    return 1
+  fi
+}
+
 resolve_compose() {
   # Prefer "docker compose" (v2 plugin); fall back to docker-compose binary.
   local docker_bin="${1:-docker}"
@@ -448,14 +458,18 @@ run_profiles_only() {
   sudo cp "$selected_ids" "${OWRX_DATA_DIR}/presets/SELECTED_PROFILES.txt"
   sudo chown -R "${USER}:${USER}" "${OWRX_DATA_DIR}/presets" 2>/dev/null || true
 
+  # Sudo/docker auth on a clean line before stop/write/reload
+  ensure_sudo || return 1
+
   local docker_bin="" compose_bin=""
-  docker_bin="$(resolve_docker 2>/dev/null || true)"
-  if [[ -n "$docker_bin" ]]; then
-    compose_bin="$(resolve_compose "$docker_bin" 2>/dev/null || true)"
+  if ! docker_bin="$(resolve_docker)"; then
+    err "Docker not reachable (is the daemon running? try: sudo systemctl start docker)"
+    return 1
   fi
+  compose_bin="$(resolve_compose "$docker_bin" || true)"
 
   # Stop first so settings.json is not overwritten while OWRX is running
-  if [[ -n "$docker_bin" ]] && $docker_bin ps --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
+  if $docker_bin ps --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
     run_quiet "Stopping ${OWRX_CONTAINER_NAME} for settings reload" "Stopped" \
       $docker_bin stop "${OWRX_CONTAINER_NAME}"
   fi
@@ -476,18 +490,14 @@ run_profiles_only() {
   fi
 
   # Always reload container so new profiles are live
-  if [[ -n "$docker_bin" ]]; then
-    if [[ -n "$compose_bin" && -f "$ROOT/docker-compose.yml" ]]; then
-      run_quiet "Reloading OpenWebRX+ container" "Container reloaded" \
-        $compose_bin up -d --force-recreate --quiet-pull
-    elif $docker_bin ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
-      run_quiet "Reloading ${OWRX_CONTAINER_NAME}" "Container reloaded" \
-        $docker_bin restart "${OWRX_CONTAINER_NAME}"
-    else
-      warn "Container ${OWRX_CONTAINER_NAME} not found — start with ./scripts/start.sh"
-    fi
+  if [[ -n "$compose_bin" && -f "$ROOT/docker-compose.yml" ]]; then
+    run_quiet "Reloading OpenWebRX+ container" "Container reloaded" \
+      $compose_bin up -d --force-recreate --quiet-pull
+  elif $docker_bin ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
+    run_quiet "Reloading ${OWRX_CONTAINER_NAME}" "Container reloaded" \
+      $docker_bin restart "${OWRX_CONTAINER_NAME}"
   else
-    warn "Docker not reachable — settings written; restart the container manually."
+    warn "Container ${OWRX_CONTAINER_NAME} not found — start with ./scripts/start.sh"
   fi
 
   rm -f "$filtered" "$selected_ids"
