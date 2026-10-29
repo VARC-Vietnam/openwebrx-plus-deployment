@@ -1,0 +1,4 @@
+{
+  "services_enabled": true,
+  "services_decoders": ["ft8"]
+}

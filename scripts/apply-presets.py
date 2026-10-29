@@ -133,11 +133,31 @@ def main() -> int:
         return 1
 
     settings["sdrs"] = new_sdrs
+
+    # Optional background decoding (presets/*/background.json)
+    background_path = preset_path.parent / "background.json"
+    bg_keys = []
+    if background_path.is_file():
+        background = json.loads(background_path.read_text(encoding="utf-8"))
+        if isinstance(background, dict):
+            for k, v in background.items():
+                settings[k] = v
+                bg_keys.append(k)
+
     names = profile_names(new_sdrs)
     payload = json.dumps(settings, indent=2) + "\n"
 
     if args.dry_run:
-        print(json.dumps({"target": str(settings_path), "profiles": names}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "target": str(settings_path),
+                    "profiles": names,
+                    "background": {k: settings.get(k) for k in bg_keys},
+                },
+                indent=2,
+            )
+        )
         return 0
 
     write_text(settings_path, payload)
@@ -149,6 +169,24 @@ def main() -> int:
         print("removed devices: " + ", ".join(dropped))
     print("devices: " + ", ".join(sorted(new_sdrs.keys())))
     print(f"profiles ({len(names)}): " + ", ".join(names))
+    if bg_keys:
+        print(
+            "background: services_enabled={0} decoders={1}".format(
+                settings.get("services_enabled"),
+                settings.get("services_decoders"),
+            )
+        )
+    for dev_id, dev in new_sdrs.items():
+        sched = (dev or {}).get("scheduler") or {}
+        if isinstance(sched, dict) and sched.get("schedule"):
+            print(
+                "schedule ({0}): always-on={1} services={2} {3}".format(
+                    dev_id,
+                    (dev or {}).get("always-on"),
+                    (dev or {}).get("services"),
+                    sched.get("schedule"),
+                )
+            )
     return 0
 
 

@@ -8,6 +8,14 @@
     "direct_sampling": 0,
     "rtltcp_compat": true,
     "port": 1234,
+    "always-on": true,
+    "services": true,
+    "scheduler": {
+      "type": "static",
+      "schedule": {
+        "0001-2359": "20m_ft8"
+      }
+    },
     "profiles": {
       "hamvn_70cm": {
         "name": "HAMVN 70cm",

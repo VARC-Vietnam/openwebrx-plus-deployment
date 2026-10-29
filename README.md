@@ -112,6 +112,19 @@ lsusb | grep -iE 'realtek|cypress|0bda|04b4'
 ./scripts/apply-presets.sh          # or: ./install.sh → option 3
 ```
 
+### Background FT8 (no browser required)
+
+RTL-SDR preset enables:
+
+| Setting | Value |
+|---------|--------|
+| Keep device running | `always-on: true` |
+| Run background services | `services: true` |
+| Static schedule (UTC) | `0001–2359` → profile `20m_ft8` (14.074 MHz) |
+| Background decoding | `services_enabled` + decoder `ft8` |
+
+OpenWebRX schedule times are **UTC**. A browser user selecting another profile temporarily overrides the schedule; when they disconnect, FT8 20m resumes.
+
 RTL-SDR Blog **v4**: turn **off** direct sampling on VHF/UHF profiles if needed.
 
 ## Update
