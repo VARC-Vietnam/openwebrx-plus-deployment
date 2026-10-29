@@ -72,16 +72,36 @@ is_debian_like() {
   [[ -f /etc/debian_version ]] || grep -qiE 'debian|ubuntu' /etc/os-release 2>/dev/null
 }
 
+pkg_installed() {
+  dpkg -s "$1" >/dev/null 2>&1
+}
+
+pkg_available() {
+  # Returns 0 if apt knows a candidate version for the package
+  local cand
+  cand="$(apt-cache policy "$1" 2>/dev/null | awk '/Candidate:/ {print $2; exit}')"
+  [[ -n "$cand" && "$cand" != "(none)" ]]
+}
+
 ensure_debian_packages() {
-  local pkgs=("$@") missing=()
+  local pkgs=("$@") missing=() unavailable=()
   local p
   for p in "${pkgs[@]}"; do
-    if ! dpkg -s "$p" >/dev/null 2>&1; then
+    if pkg_installed "$p"; then
+      continue
+    fi
+    if pkg_available "$p"; then
       missing+=("$p")
+    else
+      unavailable+=("$p")
     fi
   done
+  if [[ ${#unavailable[@]} -gt 0 ]]; then
+    warn "Not in apt for this Debian release: ${unavailable[*]}"
+  fi
   if [[ ${#missing[@]} -eq 0 ]]; then
-    return 0
+    [[ ${#unavailable[@]} -eq 0 ]]
+    return $?
   fi
   warn "Missing Debian packages: ${missing[*]}"
   if confirm "Install with apt now? (sudo)" y; then
@@ -89,6 +109,62 @@ ensure_debian_packages() {
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"
   else
     err "Install packages manually: sudo apt-get install -y ${missing[*]}"
+    return 1
+  fi
+}
+
+install_docker_debian() {
+  # Debian Trixie: docker.io + docker-compose (Compose v2)
+  # Note: docker-compose-v2 / docker-compose-plugin are NOT in Trixie apt.
+  sudo apt-get update
+
+  if ! need_cmd docker; then
+    if pkg_available docker.io; then
+      info "Installing docker.io..."
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io
+    else
+      err "Package docker.io is not available. Enable the main apt suite or install Docker CE."
+      return 1
+    fi
+  fi
+  if ! need_cmd docker; then
+    err "Docker engine install failed (docker binary still missing)."
+    return 1
+  fi
+
+  if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
+    local compose_pkg=""
+    for compose_pkg in docker-compose docker-compose-v2 docker-compose-plugin; do
+      if pkg_available "$compose_pkg"; then
+        info "Installing ${compose_pkg}..."
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$compose_pkg"
+        break
+      fi
+    done
+  fi
+
+  if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
+    err "Docker Compose not found after install."
+    err "On Debian Trixie: sudo apt-get install -y docker.io docker-compose"
+    return 1
+  fi
+
+  sudo systemctl enable --now docker
+  ok "Docker engine + Compose installed."
+}
+
+resolve_compose() {
+  # Prefer "docker compose" (v2 plugin); fall back to docker-compose binary.
+  local docker_bin="${1:-docker}"
+  if $docker_bin compose version >/dev/null 2>&1; then
+    echo "$docker_bin compose"
+  elif command -v docker-compose >/dev/null 2>&1; then
+    if [[ "$docker_bin" == "sudo docker" ]]; then
+      echo "sudo docker-compose"
+    else
+      echo "docker-compose"
+    fi
+  else
     return 1
   fi
 }
@@ -121,35 +197,28 @@ if is_debian_like; then
 fi
 
 if ! need_cmd docker; then
-  if is_debian_like && confirm "Docker not found. Install docker.io + compose plugin via apt?" y; then
-    ensure_debian_packages docker.io docker-compose-v2 || {
-      # Bookworm+ often ships compose as docker-compose-v2; fall back to plugin name
-      ensure_debian_packages docker.io docker-compose-plugin || true
-    }
-    sudo systemctl enable --now docker
+  if is_debian_like && confirm "Docker not found. Install docker.io + docker-compose via apt?" y; then
+    install_docker_debian || exit 1
   else
     err "Install Docker Engine on Debian, then re-run:"
-    err "  sudo apt-get install -y docker.io docker-compose-v2"
+    err "  sudo apt-get install -y docker.io docker-compose"
     err "  sudo systemctl enable --now docker"
     err "  sudo usermod -aG docker \"\$USER\"  # then log out/in"
     exit 1
   fi
-fi
-
-if ! docker compose version >/dev/null 2>&1; then
-  if is_debian_like && confirm "docker compose missing. Install compose plugin via apt?" y; then
-    ensure_debian_packages docker-compose-v2 || ensure_debian_packages docker-compose-plugin || true
+elif ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
+  if is_debian_like && confirm "Docker Compose missing. Install docker-compose via apt?" y; then
+    install_docker_debian || exit 1
+  else
+    err "On Debian Trixie: sudo apt-get install -y docker-compose"
+    exit 1
   fi
 fi
-if ! docker compose version >/dev/null 2>&1; then
-  err "Docker Compose v2 is required (docker compose)."
-  err "  sudo apt-get install -y docker-compose-v2"
-  exit 1
-fi
+
 ok "Docker OK: $(docker --version)"
-ok "Compose OK: $(docker compose version)"
 
 # Socket permission check
+DOCKER="docker"
 if ! docker info >/dev/null 2>&1; then
   warn "Cannot talk to Docker daemon (permission or service down)."
   if is_debian_like; then
@@ -160,11 +229,14 @@ if ! docker info >/dev/null 2>&1; then
     exit 1
   fi
   DOCKER="sudo docker"
-  COMPOSE="sudo docker compose"
-else
-  DOCKER="docker"
-  COMPOSE="docker compose"
 fi
+
+if ! COMPOSE="$(resolve_compose "$DOCKER")"; then
+  err "Docker Compose v2 is required (docker compose or docker-compose)."
+  err "  sudo apt-get install -y docker-compose"
+  exit 1
+fi
+ok "Compose OK: $($COMPOSE version 2>/dev/null | head -n1)"
 
 # Ensure plugdev exists (udev rules reference it)
 if is_debian_like && ! getent group plugdev >/dev/null; then

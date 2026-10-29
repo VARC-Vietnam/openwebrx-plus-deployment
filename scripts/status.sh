@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib.sh"
 cd "$ROOT"
 
 if [[ ! -f docker-compose.yml || ! -f .env ]]; then
@@ -11,8 +13,11 @@ fi
 # shellcheck disable=SC1091
 source .env
 
+DOCKER="$(resolve_docker)" || { echo "Docker daemon not reachable."; exit 1; }
+COMPOSE="$(resolve_compose "$DOCKER")" || { echo "Docker Compose not found."; exit 1; }
+
 echo "=== Compose ==="
-docker compose ps
+$COMPOSE ps
 echo
 echo "=== Config ==="
 echo "  Image:    ${OWRX_IMAGE}"

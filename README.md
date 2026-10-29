@@ -8,10 +8,10 @@ Deploy [slechev/openwebrxplus](https://hub.docker.com/r/slechev/openwebrxplus) o
 - USB SDR plugged into the host
 - Root/`sudo` for Docker packages, blacklist, and udev
 
-`install.sh` can install missing packages via apt:
+`install.sh` can install missing packages via apt. On **Debian Trixie** the Compose package is `docker-compose` (not `docker-compose-v2`):
 
 ```bash
-sudo apt-get install -y docker.io docker-compose-v2 usbutils udev
+sudo apt-get install -y docker.io docker-compose usbutils udev
 sudo systemctl enable --now docker
 sudo usermod -aG docker,plugdev "$USER"   # log out/in after this
 ```
