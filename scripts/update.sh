@@ -14,6 +14,8 @@ fi
 DOCKER="$(resolve_docker)" || { echo "Docker daemon not reachable."; exit 1; }
 COMPOSE="$(resolve_compose "$DOCKER")" || { echo "Docker Compose not found."; exit 1; }
 
+ensure_sondehub_hotfix "$ROOT"
+
 echo "Pulling latest image..."
 $COMPOSE pull
 $COMPOSE up -d

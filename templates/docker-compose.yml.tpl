@@ -24,6 +24,8 @@ services:
       - ${OWRX_DATA_DIR}/etc:/etc/openwebrx
       - ${OWRX_DATA_DIR}/var:/var/lib/openwebrx
       - ${OWRX_DATA_DIR}/plugins:/usr/lib/python3/dist-packages/htdocs/plugins
+      # Hotfix: SondeHub isValidValue missing self (remove when image > 2026-10-28)
+      - ./patches/sondehub.py:/usr/lib/python3/dist-packages/owrx/reporting/sondehub.py:ro
     tmpfs:
       - /tmp:mode=1777
     privileged: true

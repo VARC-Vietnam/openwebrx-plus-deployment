@@ -4,6 +4,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib.sh"
 
 # ---------- helpers ----------
 RED=$'\033[0;31m'
@@ -491,6 +493,7 @@ run_profiles_only() {
 
   # Always reload container so new profiles are live
   if [[ -n "$compose_bin" && -f "$ROOT/docker-compose.yml" ]]; then
+    ensure_sondehub_hotfix "$ROOT" || true
     run_quiet "Reloading OpenWebRX+ container" "Container reloaded" \
       $compose_bin up -d --force-recreate --quiet-pull
   elif $docker_bin ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
@@ -532,6 +535,7 @@ if [[ "$INSTALL_MODE" == "keep" ]]; then
     err "Docker Compose not found."
     exit 1
   fi
+  ensure_sondehub_hotfix "$ROOT" || true
   run_quiet "Pulling ${OWRX_IMAGE}" "Image pulled" $COMPOSE pull --quiet
   run_quiet "Starting OpenWebRX+" "Container started" $COMPOSE up -d --quiet-pull
   ok "Ready → http://localhost:${OWRX_PORT:-8073}"
@@ -958,6 +962,8 @@ ${ENV_LINES}    devices:
       - \${OWRX_DATA_DIR}/etc:/etc/openwebrx
       - \${OWRX_DATA_DIR}/var:/var/lib/openwebrx
       - \${OWRX_DATA_DIR}/plugins:/usr/lib/python3/dist-packages/htdocs/plugins
+      # Hotfix: SondeHub isValidValue missing self (remove when image > 2026-10-28)
+      - ./patches/sondehub.py:/usr/lib/python3/dist-packages/owrx/reporting/sondehub.py:ro
     tmpfs:
       - /tmp:mode=1777
     privileged: true

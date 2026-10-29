@@ -140,11 +140,18 @@ RTL-SDR Blog **v4**: turn **off** direct sampling on VHF/UHF profiles if needed.
 ./scripts/update.sh
 ```
 
+## SondeHub hotfix
+
+OpenWebRX+ images through **1.2.128** crash SondeHub uploads (`isValidValue()` missing `self`). This repo mounts `patches/sondehub.py` over the image file. `./scripts/start.sh` and `./scripts/update.sh` add the volume to an existing `docker-compose.yml` if needed, then recreate the container.
+
+Remove that volume once Docker Hub ships a build newer than the 2026-10-28 upstream fix.
+
 ## Layout
 
 ```
 .
 ├── install.sh
+├── patches/sondehub.py          # SondeHub reporter hotfix (mounted into container)
 ├── presets/{rtl_sdr,rx888}/sdrs.json
 ├── host/{owrx-blacklist.conf,99-sdr-devices.rules}
 └── scripts/

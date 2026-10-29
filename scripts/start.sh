@@ -17,6 +17,8 @@ source .env
 DOCKER="$(resolve_docker)" || { echo "Docker daemon not reachable."; exit 1; }
 COMPOSE="$(resolve_compose "$DOCKER")" || { echo "Docker Compose not found (apt install docker-compose)."; exit 1; }
 
+ensure_sondehub_hotfix "$ROOT"
+
 echo "Starting OpenWebRX+ (${OWRX_CONTAINER_NAME})..."
 $COMPOSE up -d
 echo
