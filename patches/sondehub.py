@@ -2,7 +2,8 @@
 # Fixes:
 #   1) TypeError isValidValue() — missing `self` (upstream 2b2be92b, 2026-10-28)
 #   2) AttributeError selfSpotCounter — counter used but never created in __init__
-# Remove this mount once slechev/openwebrxplus ships a build with both fixes.
+#   3) AttributeError set.append — dedupe sets must use .add(), not .append()
+# Remove this mount once slechev/openwebrxplus ships a build with these fixes.
 #
 import gzip
 import json
@@ -91,7 +92,7 @@ class Worker(threading.Thread):
                     key = (spot["serial"], spot["frame"])
                     if key not in seen:
                         buffer.append(spot)
-                        seen.append(key)
+                        seen.add(key)
 
                 # Flush accumulated spots periodically
                 now = time.monotonic()
