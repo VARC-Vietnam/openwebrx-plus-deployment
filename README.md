@@ -41,8 +41,9 @@ Sign in with the admin user/password you set in the installer.
 1. Detects an existing install (`.env`, compose, data dir, container) and offers:
    - **Keep config** — pull & restart only
    - **Reconfigure** — full prompts again
-   - **Refresh presets** — copy latest `sdrs.json` into the data dir
+   - **Select profiles only** — checkbox UI, apply profile changes (nothing else)
    - **Abort**
+   Shortcut: `./install.sh --profiles`
 2. Verifies Debian host; offers apt install of Docker / `usbutils`
 3. Adds your user to `docker` + `plugdev` (skips if already a member)
 4. Scans USB for RTL-SDR / RX-888
@@ -106,12 +107,11 @@ lsusb | grep -iE 'realtek|cypress|0bda|04b4'
 
 ## Applying profiles
 
-`install.sh` and `./scripts/apply-presets.sh` show preset profiles as **checkboxes** so you pick what stays enabled, then write them into live `settings.json` (Airspy HF+ / SDRPlay removed).
+To change **only** which profiles are available (no reconfigure):
 
 ```bash
-./scripts/apply-presets.sh          # interactive checkboxes
-./scripts/apply-presets.sh --all    # keep every preset profile
-# or: ./install.sh → option 3
+./install.sh --profiles
+# or: ./install.sh  →  option 3) Select profiles only
 ```
 
 Controls: type profile numbers to toggle (`1 3 5`), `a` = all, `n` = none, Enter = confirm.

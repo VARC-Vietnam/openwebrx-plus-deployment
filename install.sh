@@ -335,10 +335,24 @@ detect_existing_install() {
 }
 
 # ---------- already configured? ----------
-INSTALL_MODE="fresh"   # fresh | keep | reconfigure | presets
+INSTALL_MODE="fresh"   # fresh | keep | reconfigure | profiles
+# CLI shortcut: ./install.sh --profiles  → select profiles only
+if [[ "${1:-}" == "--profiles" || "${1:-}" == "-p" ]]; then
+  INSTALL_MODE="profiles"
+elif [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  cat <<EOF
+Usage: ./install.sh [option]
+
+  (no args)     Interactive install / manage existing deploy
+  --profiles    Select profiles only (checkbox UI) and apply
+  -p            Same as --profiles
+EOF
+  exit 0
+fi
+
 detect_existing_install
 
-if [[ "$EXISTING" == true ]]; then
+if [[ "$INSTALL_MODE" == "fresh" && "$EXISTING" == true ]]; then
   step "0" "Existing installation"
   info "Repo: ${ROOT}"
   echo
@@ -357,33 +371,109 @@ if [[ "$EXISTING" == true ]]; then
   fi
   echo "  1) Keep config — pull image & (re)start only"
   echo "  2) Reconfigure — run full installer prompts again"
-  echo "  3) Refresh presets only — copy latest sdrs.json into data dir"
+  echo "  3) Select profiles only — checkbox which profiles stay available"
   echo "  4) Abort"
   EXISTING_CHOICE=""
   while [[ -z "$EXISTING_CHOICE" ]]; do
-    prompt EXISTING_CHOICE "Choose [1-4]" "1"
+    prompt EXISTING_CHOICE "Choose [1-4]" "3"
     case "$EXISTING_CHOICE" in
       1) INSTALL_MODE="keep" ;;
       2) INSTALL_MODE="reconfigure" ;;
-      3) INSTALL_MODE="presets" ;;
+      3) INSTALL_MODE="profiles" ;;
       4) warn "Aborted."; exit 0 ;;
       *) EXISTING_CHOICE=""; warn "Invalid choice." ;;
     esac
   done
 fi
 
-# ---------- presets-only fast path ----------
-if [[ "$INSTALL_MODE" == "presets" ]]; then
-  step "…" "Refresh presets"
+# ---------- profiles-only fast path (option 3 / --profiles) ----------
+run_profiles_only() {
   if [[ ! -f "$ROOT/.env" ]]; then
-    err "No .env — cannot refresh presets. Choose reconfigure (2) instead."
-    exit 1
+    err "No .env — run a full install first (./install.sh)."
+    return 1
   fi
-  info "RTL/RX-888 only — drop Airspy/SDRPlay"
+  # shellcheck disable=SC1091
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT/.env"
+  set +a
+
+  local device="${OWRX_DEVICE:-rtl_sdr}"
+  local preset_full="${ROOT}/presets/${device}/sdrs.json"
+  local background="${ROOT}/presets/${device}/background.json"
+  local var_dir="${OWRX_DATA_DIR}/var"
+  local filtered selected_ids
+  filtered="$(mktemp)"
+  selected_ids="$(mktemp)"
+
+  if [[ ! -f "$preset_full" ]]; then
+    err "Preset not found: ${preset_full}"
+    rm -f "$filtered" "$selected_ids"
+    return 1
+  fi
+
+  step "1/2" "Select profiles"
+  info "Device: ${device}   Data: ${OWRX_DATA_DIR}"
   echo
-  "$ROOT/scripts/apply-presets.sh"
-  ok "Presets applied to live settings."
-  exit 0
+  sleep 0.3
+
+  python3 "$ROOT/scripts/select-profiles.py" \
+    --preset "$preset_full" \
+    --output "$filtered" \
+    --selected-file "$selected_ids"
+
+  step "2/2" "Apply selected profiles"
+  sudo mkdir -p "${OWRX_DATA_DIR}/presets" "$var_dir"
+  sudo cp "$preset_full" "${OWRX_DATA_DIR}/presets/sdrs.${device}.json"
+  sudo cp "$filtered" "${OWRX_DATA_DIR}/presets/sdrs.json"
+  sudo cp "$filtered" "${OWRX_DATA_DIR}/presets/sdrs.selected.json"
+  sudo cp "$selected_ids" "${OWRX_DATA_DIR}/presets/SELECTED_PROFILES.txt"
+  sudo chown -R "${USER}:${USER}" "${OWRX_DATA_DIR}/presets" 2>/dev/null || true
+
+  local docker_bin="" compose_bin="" was_running=false
+  if docker_bin="$(resolve_docker 2>/dev/null)"; then
+    compose_bin="$(resolve_compose "$docker_bin" 2>/dev/null || true)"
+    if $docker_bin ps --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
+      was_running=true
+      run_quiet "Stopping ${OWRX_CONTAINER_NAME}" "Stopped" \
+        $docker_bin stop "${OWRX_CONTAINER_NAME}"
+    fi
+  fi
+
+  local bg_args=()
+  [[ -f "$background" ]] && bg_args=(--background "$background")
+  run_quiet "Writing settings.json" "Settings updated" \
+    python3 "$ROOT/scripts/apply-presets.py" \
+      --var-dir "$var_dir" \
+      --preset "$filtered" \
+      "${bg_args[@]}"
+
+  if [[ -d "${OWRX_DATA_DIR}/etc" ]]; then
+    python3 "$ROOT/scripts/apply-presets.py" \
+      --var-dir "${OWRX_DATA_DIR}/etc" \
+      --preset "$filtered" \
+      "${bg_args[@]}" >/dev/null 2>&1 || true
+  fi
+
+  if [[ "$was_running" == true && -n "$docker_bin" ]]; then
+    if [[ -n "$compose_bin" && -f "$ROOT/docker-compose.yml" ]]; then
+      run_quiet "Starting OpenWebRX+" "Container started" \
+        $compose_bin up -d --quiet-pull
+    else
+      run_quiet "Starting ${OWRX_CONTAINER_NAME}" "Container started" \
+        $docker_bin start "${OWRX_CONTAINER_NAME}"
+    fi
+  fi
+
+  rm -f "$filtered" "$selected_ids"
+  echo
+  ok "Profiles updated only — no other install settings changed."
+  info "Web UI: http://localhost:${OWRX_PORT:-8073}"
+}
+
+if [[ "$INSTALL_MODE" == "profiles" ]]; then
+  run_profiles_only
+  exit $?
 fi
 
 # ---------- keep-config fast path ----------
