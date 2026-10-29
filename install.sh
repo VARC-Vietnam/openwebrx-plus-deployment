@@ -355,17 +355,21 @@ detect_existing_install() {
 }
 
 # ---------- already configured? ----------
-INSTALL_MODE="fresh"   # fresh | keep | reconfigure | profiles
-# CLI shortcut: ./install.sh --profiles  → select profiles only
+INSTALL_MODE="fresh"   # fresh | keep | reconfigure | profiles | services
+# CLI shortcuts
 if [[ "${1:-}" == "--profiles" || "${1:-}" == "-p" ]]; then
   INSTALL_MODE="profiles"
+elif [[ "${1:-}" == "--services" || "${1:-}" == "-s" ]]; then
+  INSTALL_MODE="services"
 elif [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   cat <<EOF
 Usage: ./install.sh [option]
 
   (no args)     Interactive install / manage existing deploy
-  --profiles    Select profiles only (checkbox UI) and apply
+  --profiles    Select profiles + background decoders (checkbox UI)
   -p            Same as --profiles
+  --services    Background decoders only (checkbox UI)
+  -s            Same as --services
 EOF
   exit 0
 fi
@@ -401,19 +405,158 @@ if [[ "$INSTALL_MODE" == "fresh" && "$EXISTING" == true ]]; then
   echo "  1) Keep config — pull image & (re)start only"
   echo "  2) Reconfigure — run full installer prompts again"
   echo "  3) Select profiles only — checkbox which profiles stay available"
-  echo "  4) Abort"
+  echo "  4) Background decoders only — checkbox (FT8, Sonde RS41, …)"
+  echo "  5) Abort"
   EXISTING_CHOICE=""
   while [[ -z "$EXISTING_CHOICE" ]]; do
-    prompt EXISTING_CHOICE "Choose [1-4]" "3"
+    prompt EXISTING_CHOICE "Choose [1-5]" "3"
     case "$EXISTING_CHOICE" in
       1) INSTALL_MODE="keep" ;;
       2) INSTALL_MODE="reconfigure" ;;
       3) INSTALL_MODE="profiles" ;;
-      4) warn "Aborted."; exit 0 ;;
+      4) INSTALL_MODE="services" ;;
+      5) warn "Aborted."; exit 0 ;;
       *) EXISTING_CHOICE=""; warn "Invalid choice." ;;
     esac
   done
 fi
+
+# ---------- background decoder selection (checkbox UI) ----------
+# Sets: SELECTED_BACKGROUND_JSON SELECTED_SERVICES_FILE
+#        ENABLE_MQTT ENABLE_SONDEHUB SONDEHUB_CALLSIGN SCHEDULE_TO_SONDE
+SELECTED_BACKGROUND_JSON=""
+SELECTED_SERVICES_FILE=""
+ENABLE_MQTT="${ENABLE_MQTT:-false}"
+ENABLE_SONDEHUB="${ENABLE_SONDEHUB:-false}"
+SONDEHUB_CALLSIGN="${SONDEHUB_CALLSIGN:-}"
+SCHEDULE_TO_SONDE=false
+
+run_select_background_services() {
+  local data_dir="${1:-${OWRX_DATA_DIR:-/opt/owrx-docker}}"
+  local catalog="${ROOT}/presets/services.json"
+  SELECTED_BACKGROUND_JSON="$(mktemp)"
+  SELECTED_SERVICES_FILE="$(mktemp)"
+
+  if [[ ! -f "$catalog" ]]; then
+    err "Services catalog missing: ${catalog}"
+    return 1
+  fi
+
+  local initial_args=()
+  local prev="${data_dir}/presets/SELECTED_SERVICES.txt"
+  local prev_bg="${data_dir}/presets/background.json"
+  if [[ -f "$prev" ]]; then
+    initial_args=(--initial-selected "$prev")
+  elif [[ -f "$prev_bg" ]]; then
+    initial_args=(--initial-selected "$prev_bg")
+  fi
+
+  info "MQTT is optional (publish/receive spots). Background Sonde needs services_decoders + 403 MHz schedule."
+  echo
+  sleep 0.3
+
+  python3 "$ROOT/scripts/select-services.py" \
+    --catalog "$catalog" \
+    --output "$SELECTED_BACKGROUND_JSON" \
+    --selected-file "$SELECTED_SERVICES_FILE" \
+    "${initial_args[@]}"
+
+  ENABLE_MQTT="${ENABLE_MQTT:-false}"
+  ENABLE_SONDEHUB="${ENABLE_SONDEHUB:-false}"
+  SCHEDULE_TO_SONDE=false
+  SONDEHUB_CALLSIGN="${SONDEHUB_CALLSIGN:-${OPENWEBRX_ADMIN_USER:-}}"
+
+  if grep -qE '^sonde-' "$SELECTED_SERVICES_FILE" 2>/dev/null; then
+    echo
+    info "Sonde decoder(s) selected."
+    if confirm "Set idle schedule to Sonde RS41 403 (instead of FT8 20m)?" y; then
+      SCHEDULE_TO_SONDE=true
+    fi
+    if confirm "Enable SondeHub telemetry upload?" y; then
+      ENABLE_SONDEHUB=true
+      prompt SONDEHUB_CALLSIGN "SondeHub callsign / uploader id" "${SONDEHUB_CALLSIGN:-N0CALL}"
+    fi
+    if confirm "Run local MQTT broker (Mosquitto) for sonde/report pub-sub?" n; then
+      ENABLE_MQTT=true
+    fi
+  elif confirm "Run local MQTT broker (Mosquitto) anyway?" n; then
+    ENABLE_MQTT=true
+  fi
+}
+
+apply_schedule_to_sonde() {
+  local preset_file="$1"
+  [[ -f "$preset_file" ]] || return 0
+  python3 - "$preset_file" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+data = json.loads(path.read_text(encoding="utf-8"))
+changed = False
+for device in data.values():
+    if not isinstance(device, dict):
+        continue
+    profiles = device.get("profiles") or {}
+    if "sonde_rs41_403" not in profiles:
+        print("warn: profile sonde_rs41_403 not in selection — schedule unchanged", file=sys.stderr)
+        continue
+    device["always-on"] = True
+    device["services"] = True
+    device["scheduler"] = {
+        "type": "static",
+        "schedule": {"0001-2359": "sonde_rs41_403"},
+    }
+    changed = True
+if changed:
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    print("schedule: idle profile → sonde_rs41_403")
+PY
+}
+
+apply_reporting_settings() {
+  local var_dir="$1"
+  local etc_dir="$2"
+  local patch
+  patch="$(mktemp)"
+  python3 - "$patch" "$ENABLE_MQTT" "$ENABLE_SONDEHUB" "$SONDEHUB_CALLSIGN" <<'PY'
+import json, sys
+from pathlib import Path
+out, enable_mqtt, enable_sondehub, callsign = sys.argv[1:5]
+patch = {}
+if enable_mqtt == "true":
+    patch.update({
+        "mqtt_enabled": True,
+        "mqtt_host": "mosquitto",
+        "mqtt_use_ssl": False,
+        "mqtt_topic": "openwebrx",
+        "mqtt_sonde": True,
+        "mqtt_wsjt": True,
+        "mqtt_aprs": True,
+        "mqtt_meshtastic": True,
+        "report_clients": False,
+        "report_radio": True,
+    })
+if enable_sondehub == "true":
+    patch.update({
+        "sondehub_enabled": True,
+        "sondehub_callsign": callsign or "N0CALL",
+    })
+Path(out).write_text(json.dumps(patch, indent=2) + "\n", encoding="utf-8")
+print("reporting patch keys:", ", ".join(sorted(patch.keys())) or "(none)")
+PY
+  if [[ -s "$patch" ]] && grep -q '[^[:space:]{}]' "$patch"; then
+    python3 "$ROOT/scripts/apply-settings-keys.py" --var-dir "$var_dir" --patch "$patch" || true
+  fi
+  rm -f "$patch"
+
+  if [[ -f "${SELECTED_SERVICES_FILE:-}" ]] && grep -qE '^sonde-' "$SELECTED_SERVICES_FILE"; then
+    local modes
+    modes="$(grep -E '^sonde-' "$SELECTED_SERVICES_FILE" | paste -sd, -)"
+    python3 "$ROOT/scripts/ensure-sonde-bandplan.py" \
+      --etc-dir "$etc_dir" \
+      --modes "$modes" || true
+  fi
+}
 
 # ---------- profiles-only fast path (option 3 / --profiles) ----------
 run_profiles_only() {
@@ -441,7 +584,7 @@ run_profiles_only() {
     return 1
   fi
 
-  step "1/2" "Select profiles"
+  step "1/3" "Select profiles"
   info "Device: ${device}   Data: ${OWRX_DATA_DIR}"
   echo
   sleep 0.3
@@ -461,13 +604,32 @@ run_profiles_only() {
     --selected-file "$selected_ids" \
     "${initial_args[@]}"
 
-  step "2/2" "Apply selected profiles"
-  sudo mkdir -p "${OWRX_DATA_DIR}/presets" "$var_dir"
+  step "2/3" "Select background decoders"
+  run_select_background_services "${OWRX_DATA_DIR}"
+  background="${SELECTED_BACKGROUND_JSON}"
+
+  if [[ "$SCHEDULE_TO_SONDE" == true ]]; then
+    apply_schedule_to_sonde "$filtered"
+  fi
+
+  step "3/3" "Apply profiles + services"
+  sudo mkdir -p "${OWRX_DATA_DIR}/presets" "$var_dir" "${OWRX_DATA_DIR}/etc"
   sudo cp "$preset_full" "${OWRX_DATA_DIR}/presets/sdrs.${device}.json"
   sudo cp "$filtered" "${OWRX_DATA_DIR}/presets/sdrs.json"
   sudo cp "$filtered" "${OWRX_DATA_DIR}/presets/sdrs.selected.json"
   sudo cp "$selected_ids" "${OWRX_DATA_DIR}/presets/SELECTED_PROFILES.txt"
+  sudo cp "$background" "${OWRX_DATA_DIR}/presets/background.json"
+  sudo cp "$SELECTED_SERVICES_FILE" "${OWRX_DATA_DIR}/presets/SELECTED_SERVICES.txt"
   sudo chown -R "${USER}:${USER}" "${OWRX_DATA_DIR}/presets" 2>/dev/null || true
+
+  # Persist MQTT flag into .env for compose regeneration on next full install
+  if [[ -f "$ROOT/.env" ]]; then
+    if grep -q '^ENABLE_MQTT=' "$ROOT/.env"; then
+      sed -i.bak "s/^ENABLE_MQTT=.*/ENABLE_MQTT=${ENABLE_MQTT}/" "$ROOT/.env" && rm -f "$ROOT/.env.bak"
+    else
+      echo "ENABLE_MQTT=${ENABLE_MQTT}" >> "$ROOT/.env"
+    fi
+  fi
 
   # Sudo/docker auth on a clean line before stop/write/reload
   ensure_sudo || return 1
@@ -485,26 +647,28 @@ run_profiles_only() {
       $docker_bin stop "${OWRX_CONTAINER_NAME}"
   fi
 
-  local bg_args=()
-  [[ -f "$background" ]] && bg_args=(--background "$background")
   run_quiet "Writing settings.json" "Settings updated" \
     python3 "$ROOT/scripts/apply-presets.py" \
       --var-dir "$var_dir" \
       --preset "$filtered" \
-      "${bg_args[@]}"
+      --background "$background"
 
-  if [[ -d "${OWRX_DATA_DIR}/etc" ]]; then
-    python3 "$ROOT/scripts/apply-presets.py" \
-      --var-dir "${OWRX_DATA_DIR}/etc" \
-      --preset "$filtered" \
-      "${bg_args[@]}" >/dev/null 2>&1 || true
-  fi
+  apply_reporting_settings "$var_dir" "${OWRX_DATA_DIR}/etc"
 
   # Always reload container so new profiles are live
   if [[ -n "$compose_bin" && -f "$ROOT/docker-compose.yml" ]]; then
     ensure_sondehub_hotfix "$ROOT" || true
-    run_quiet "Reloading OpenWebRX+ container" "Container reloaded" \
-      $compose_bin up -d --force-recreate --quiet-pull
+    if [[ "$ENABLE_MQTT" == true ]]; then
+      # Ensure mosquitto service exists in compose (inject if missing)
+      if ! grep -q 'container_name:.*mosquitto\|image: eclipse-mosquitto' "$ROOT/docker-compose.yml"; then
+        warn "Mosquitto not in docker-compose.yml — re-run install option 2 (reconfigure) to add it, or start an external broker."
+      fi
+      run_quiet "Reloading OpenWebRX+ (+ MQTT if configured)" "Container reloaded" \
+        $compose_bin up -d --force-recreate --quiet-pull
+    else
+      run_quiet "Reloading OpenWebRX+ container" "Container reloaded" \
+        $compose_bin up -d --force-recreate --quiet-pull
+    fi
   elif $docker_bin ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
     run_quiet "Reloading ${OWRX_CONTAINER_NAME}" "Container reloaded" \
       $docker_bin restart "${OWRX_CONTAINER_NAME}"
@@ -512,14 +676,70 @@ run_profiles_only() {
     warn "Container ${OWRX_CONTAINER_NAME} not found — start with ./scripts/start.sh"
   fi
 
-  rm -f "$filtered" "$selected_ids"
+  rm -f "$filtered" "$selected_ids" "$SELECTED_BACKGROUND_JSON" "$SELECTED_SERVICES_FILE"
   echo
-  ok "Profiles updated and container reloaded."
+  ok "Profiles + background decoders updated; container reloaded."
   info "Web UI: http://localhost:${OWRX_PORT:-8073}"
+}
+
+run_services_only() {
+  if [[ ! -f "$ROOT/.env" ]]; then
+    err "No .env — run a full install first (./install.sh)."
+    return 1
+  fi
+  set -a; source "$ROOT/.env"; set +a
+  local var_dir="${OWRX_DATA_DIR}/var"
+  local device="${OWRX_DEVICE:-rtl_sdr}"
+  local preset="${OWRX_DATA_DIR}/presets/sdrs.selected.json"
+  [[ -f "$preset" ]] || preset="${ROOT}/presets/${device}/sdrs.json"
+
+  step "1/2" "Select background decoders"
+  run_select_background_services "${OWRX_DATA_DIR}"
+
+  if [[ "$SCHEDULE_TO_SONDE" == true && -f "$preset" ]]; then
+    local tmp
+    tmp="$(mktemp)"
+    cp "$preset" "$tmp"
+    apply_schedule_to_sonde "$tmp"
+    preset="$tmp"
+  fi
+
+  step "2/2" "Apply background decoding settings"
+  ensure_sudo || return 1
+  sudo mkdir -p "${OWRX_DATA_DIR}/presets" "${OWRX_DATA_DIR}/etc" "$var_dir"
+  sudo cp "$SELECTED_BACKGROUND_JSON" "${OWRX_DATA_DIR}/presets/background.json"
+  sudo cp "$SELECTED_SERVICES_FILE" "${OWRX_DATA_DIR}/presets/SELECTED_SERVICES.txt"
+  sudo chown -R "${USER}:${USER}" "${OWRX_DATA_DIR}/presets" 2>/dev/null || true
+
+  local docker_bin compose_bin=""
+  docker_bin="$(resolve_docker)" || { err "Docker not reachable"; return 1; }
+  compose_bin="$(resolve_compose "$docker_bin" || true)"
+  if $docker_bin ps --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
+    run_quiet "Stopping ${OWRX_CONTAINER_NAME}" "Stopped" $docker_bin stop "${OWRX_CONTAINER_NAME}"
+  fi
+
+  run_quiet "Writing settings.json" "Settings updated" \
+    python3 "$ROOT/scripts/apply-presets.py" \
+      --var-dir "$var_dir" \
+      --preset "$preset" \
+      --background "$SELECTED_BACKGROUND_JSON"
+  apply_reporting_settings "$var_dir" "${OWRX_DATA_DIR}/etc"
+
+  if [[ -n "$compose_bin" && -f "$ROOT/docker-compose.yml" ]]; then
+    ensure_sondehub_hotfix "$ROOT" || true
+    run_quiet "Reloading containers" "Reloaded" $compose_bin up -d --force-recreate --quiet-pull
+  fi
+  rm -f "$SELECTED_BACKGROUND_JSON" "$SELECTED_SERVICES_FILE"
+  [[ -n "${tmp:-}" ]] && rm -f "$tmp"
+  ok "Background decoders updated."
 }
 
 if [[ "$INSTALL_MODE" == "profiles" ]]; then
   run_profiles_only
+  exit $?
+fi
+if [[ "$INSTALL_MODE" == "services" ]]; then
+  run_services_only
   exit $?
 fi
 
@@ -685,8 +905,17 @@ python3 "$ROOT/scripts/select-profiles.py" \
 ok "Profile selection saved"
 sleep 0.8
 
+# ---------- background decoders ----------
+step "5/12" "Background decoding services"
+run_select_background_services "${OWRX_DATA_DIR:-/opt/owrx-docker}"
+if [[ "$SCHEDULE_TO_SONDE" == true && -n "${SELECTED_PRESET:-}" && -f "$SELECTED_PRESET" ]]; then
+  apply_schedule_to_sonde "$SELECTED_PRESET"
+fi
+ok "Background decoder selection saved"
+sleep 0.6
+
 # ---------- image / softmbe ----------
-step "5/11" "Docker image"
+step "6/12" "Docker image"
 echo "  1) slechev/openwebrxplus          (standard)"
 echo "  2) slechev/openwebrxplus-softmbe  (includes SoftMBE digital voice)"
 echo
@@ -705,7 +934,7 @@ ok "Image: ${OWRX_IMAGE}"
 sleep 0.6
 
 # ---------- admin / presets ----------
-step "6/11" "Admin, timezone, ports, data"
+step "7/12" "Admin, timezone, ports, data"
 DEFAULT_TZ="$(detect_debian_tz)"
 prompt OWRX_CONTAINER_NAME "Container name" "${OWRX_CONTAINER_NAME:-openwebrxplus}"
 prompt OWRX_PORT "Web UI host port" "${OWRX_PORT:-8073}"
@@ -735,7 +964,7 @@ FORWARD_RTL_TCP_EXTERNAL=""
 EXTRA_PORTS=""
 EXTRA_ENV=""
 
-step "7/11" "Device binding / rtl_tcp"
+step "8/12" "Device binding / rtl_tcp"
 info "USB devices are always bound via /dev/bus/usb into the container."
 echo
 
@@ -765,7 +994,7 @@ fi
 sleep 0.6
 
 # ---------- healthcheck ----------
-step "8/11" "Health checks"
+step "9/12" "Health checks"
 HEALTHCHECK_SDR_DEVICES=1
 HEALTHCHECK_USB=""
 case "$OWRX_DEVICE" in
@@ -810,7 +1039,7 @@ fi
 echo
 
 # ---------- host prep ----------
-step "9/11" "Host preparation (blacklist + udev)"
+step "10/12" "Host preparation (blacklist + udev)"
 DO_BLACKLIST=false
 DO_UDEV=false
 if [[ -f /etc/modprobe.d/owrx-blacklist.conf ]]; then
@@ -830,7 +1059,7 @@ fi
 sleep 0.6
 
 # ---------- summary ----------
-step "10/11" "Summary"
+step "11/12" "Summary"
 cat <<EOF
   Device:        ${DEVICE_LABEL} (${OWRX_DEVICE})
   Image:         ${OWRX_IMAGE}
@@ -843,6 +1072,8 @@ cat <<EOF
   Blacklist:     ${DO_BLACKLIST}
   Udev rules:    ${DO_UDEV}
   Autoheal:      ${ENABLE_AUTOHEAL}
+  MQTT broker:   ${ENABLE_MQTT}
+  SondeHub:      ${ENABLE_SONDEHUB}
 EOF
 echo
 if ! confirm "Proceed with install?" y; then
@@ -876,8 +1107,8 @@ bold "Seeding selected device profiles (no Airspy / SDRPlay)..."
 PRESET_FULL="${PRESET_FULL:-${ROOT}/presets/${OWRX_DEVICE}/sdrs.json}"
 PRESET_SRC="${SELECTED_PRESET:-$PRESET_FULL}"
 PRESET_DST="${OWRX_DATA_DIR}/presets/sdrs.${OWRX_DEVICE}.json"
-BACKGROUND_JSON="${ROOT}/presets/${OWRX_DEVICE}/background.json"
-mkdir -p "${OWRX_DATA_DIR}/presets"
+BACKGROUND_JSON="${SELECTED_BACKGROUND_JSON:-${ROOT}/presets/${OWRX_DEVICE}/background.json}"
+mkdir -p "${OWRX_DATA_DIR}/presets" "${OWRX_DATA_DIR}/etc"
 if [[ -f "$PRESET_FULL" ]]; then
   cp "$PRESET_FULL" "$PRESET_DST"
 fi
@@ -887,6 +1118,12 @@ if [[ -f "$PRESET_SRC" ]]; then
   if [[ -n "${SELECTED_IDS_FILE:-}" && -f "$SELECTED_IDS_FILE" ]]; then
     cp "$SELECTED_IDS_FILE" "${OWRX_DATA_DIR}/presets/SELECTED_PROFILES.txt"
   fi
+  if [[ -f "$BACKGROUND_JSON" ]]; then
+    cp "$BACKGROUND_JSON" "${OWRX_DATA_DIR}/presets/background.json"
+  fi
+  if [[ -n "${SELECTED_SERVICES_FILE:-}" && -f "$SELECTED_SERVICES_FILE" ]]; then
+    cp "$SELECTED_SERVICES_FILE" "${OWRX_DATA_DIR}/presets/SELECTED_SERVICES.txt"
+  fi
   if command -v python3 >/dev/null 2>&1; then
     BG_ARGS=()
     [[ -f "$BACKGROUND_JSON" ]] && BG_ARGS=(--background "$BACKGROUND_JSON")
@@ -895,6 +1132,7 @@ if [[ -f "$PRESET_SRC" ]]; then
       --preset "$PRESET_SRC" \
       "${BG_ARGS[@]}" \
       && ok "Live settings seeded with selected profiles"
+    apply_reporting_settings "${OWRX_DATA_DIR}/var" "${OWRX_DATA_DIR}/etc"
   else
     ok "Preset copied → ${OWRX_DATA_DIR}/presets/sdrs.json"
     warn "python3 missing — could not rewrite settings.json yet"
@@ -926,6 +1164,9 @@ FORWARD_LOCALPORT_INTERNAL=${FORWARD_LOCALPORT_INTERNAL}
 FORWARD_RTL_TCP_EXTERNAL=${FORWARD_RTL_TCP_EXTERNAL}
 HEALTHCHECK_USB=${HEALTHCHECK_USB}
 HEALTHCHECK_SDR_DEVICES=${HEALTHCHECK_SDR_DEVICES:-}
+ENABLE_MQTT=${ENABLE_MQTT:-false}
+ENABLE_SONDEHUB=${ENABLE_SONDEHUB:-false}
+SONDEHUB_CALLSIGN=${SONDEHUB_CALLSIGN:-}
 EOF
 ok "Wrote ${ROOT}/.env"
 
@@ -951,6 +1192,31 @@ if [[ -n "${EXTRA_PORTS}" ]]; then
   PORTS_LINES="${EXTRA_PORTS}"$'\n'
 fi
 
+MQTT_SERVICE=""
+MQTT_DEPENDS=""
+if [[ "${ENABLE_MQTT:-false}" == true ]]; then
+  MQTT_DEPENDS="    depends_on:
+      - mosquitto
+"
+  MQTT_SERVICE="$(cat <<'MQTTEOF'
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: ${OWRX_CONTAINER_NAME}-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    # Anonymous local broker for OpenWebRX+ pub/sub (sonde, WSJT, APRS, …)
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        printf 'listener 1883\nallow_anonymous true\n' > /tmp/mosquitto.conf
+        exec mosquitto -c /tmp/mosquitto.conf
+MQTTEOF
+)"
+fi
+
 cat > "$OUT" <<EOF
 # Generated by install.sh — re-run ./install.sh to regenerate.
 
@@ -961,7 +1227,7 @@ services:
     restart: unless-stopped
     ports:
       - "\${OWRX_PORT}:8073"
-${PORTS_LINES}    environment:
+${PORTS_LINES}${MQTT_DEPENDS}    environment:
       TZ: \${TZ}
       OPENWEBRX_ADMIN_USER: \${OPENWEBRX_ADMIN_USER}
       OPENWEBRX_ADMIN_PASSWORD: \${OPENWEBRX_ADMIN_PASSWORD}
@@ -976,7 +1242,7 @@ ${ENV_LINES}    devices:
     tmpfs:
       - /tmp:mode=1777
     privileged: true
-
+${MQTT_SERVICE}
   autoheal:
     image: willfarrell/autoheal:latest
     container_name: \${OWRX_CONTAINER_NAME}-autoheal
@@ -1016,7 +1282,7 @@ fi
 echo
 
 # ---------- pull & start ----------
-step "11/11" "Pull image & start container"
+step "12/12" "Pull image & start container"
 COMPOSE="${COMPOSE:-docker compose}"
 if confirm "Pull image and start OpenWebRX+ now?" y; then
   run_quiet "Pulling ${OWRX_IMAGE}" "Image pulled" \

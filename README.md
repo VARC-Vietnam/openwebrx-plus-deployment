@@ -120,18 +120,25 @@ Device settings tuned in the web UI (**PPM, gain, schedule, always-on, …**) ar
 Controls: **↑/↓** move, **Space** toggle, **a** all, **n** none, **Enter** confirm, **q** cancel.  
 Profiles are listed by frequency; selected rows use a brighter color than unselected.
 
-### Background FT8 (no browser required)
+### Background decoding (checkbox UI)
 
-RTL-SDR preset enables:
+Install step **Background decoding services** (also `./install.sh --services` or option **4**) uses the same checkbox UI as profiles.
 
-| Setting | Value |
-|---------|--------|
-| Keep device running | `always-on: true` |
-| Run background services | `services: true` |
-| Static schedule (UTC) | `0001–2359` → profile `20m_ft8` (14.074 MHz) |
-| Background decoding | `services_enabled` + decoder `ft8` |
+Pick decoders such as **FT8**, **Meshtastic**, **Sonde RS41**, …. That writes `services_enabled` + `services_decoders` into `settings.json`.
 
-OpenWebRX schedule times are **UTC**. A browser user selecting another profile temporarily overrides the schedule; when they disconnect, FT8 20m resumes.
+**Sonde RS41 note:** MQTT is **not** required to decode. You need:
+
+1. `sonde-rs41` checked in background services  
+2. Profile **Sonde RS41 403** enabled  
+3. Idle schedule on that profile (installer can set this when you enable Sonde)  
+4. Bandplan dial at 403 MHz (installer adds it under `etc/`)
+
+Optional follow-ups when Sonde is selected:
+
+- **SondeHub** upload  
+- **Local Mosquitto MQTT** broker (compose service + `mqtt_host=mosquitto`) for pub/sub of spots  
+
+Default idle schedule remains FT8 20m unless you opt into the Sonde schedule.
 
 RTL-SDR Blog **v4**: turn **off** direct sampling on VHF/UHF profiles if needed.
 

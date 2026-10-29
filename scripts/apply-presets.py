@@ -217,7 +217,9 @@ def main() -> int:
 
     settings["sdrs"] = new_sdrs
 
-    # Optional background decoding — only seed keys that are not already set
+    # Optional background decoding.
+    # Explicit --background always overwrites; auto-discovered file only seeds missing keys.
+    explicit_background = bool(args.background)
     if args.background:
         background_path = Path(args.background)
     else:
@@ -227,7 +229,12 @@ def main() -> int:
         background = json.loads(background_path.read_text(encoding="utf-8"))
         if isinstance(background, dict):
             for k, v in background.items():
-                if k in settings and not args.replace_device and not created:
+                if (
+                    k in settings
+                    and not explicit_background
+                    and not args.replace_device
+                    and not created
+                ):
                     continue
                 settings[k] = v
                 bg_keys.append(k)

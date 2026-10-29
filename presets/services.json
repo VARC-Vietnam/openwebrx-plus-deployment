@@ -1,0 +1,14 @@
+[
+  {"id": "ft8", "name": "FT8", "default": true},
+  {"id": "ft4", "name": "FT4", "default": true},
+  {"id": "wspr", "name": "WSPR", "default": false},
+  {"id": "sstv", "name": "SSTV", "default": true},
+  {"id": "packet", "name": "APRS / Packet", "default": true},
+  {"id": "meshtastic", "name": "Meshtastic", "default": true},
+  {"id": "sonde-rs41", "name": "Sonde RS41", "default": false},
+  {"id": "sonde-dfm9", "name": "Sonde DFM9", "default": false},
+  {"id": "sonde-dfm17", "name": "Sonde DFM17", "default": false},
+  {"id": "sonde-m10", "name": "Sonde M10", "default": false},
+  {"id": "sonde-m20", "name": "Sonde M20", "default": false},
+  {"id": "sonde-mts01", "name": "Sonde MTS01", "default": false}
+]
