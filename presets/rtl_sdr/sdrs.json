@@ -276,6 +276,16 @@
         "tuning_step": 25000,
         "rf_gain": 49.6,
         "direct_sampling": 0
+      },
+      "sonde_rs41_403": {
+        "name": "Sonde RS41 403",
+        "center_freq": 403000000,
+        "samp_rate": 2400000,
+        "start_freq": 403000000,
+        "start_mod": "sonde-rs41",
+        "tuning_step": 10000,
+        "rf_gain": 49.6,
+        "direct_sampling": 0
       }
     }
   }
