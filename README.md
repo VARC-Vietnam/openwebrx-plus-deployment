@@ -38,13 +38,18 @@ Sign in with the admin user/password you set in the installer.
 
 ## What `install.sh` does
 
-1. Verifies Debian host; offers apt install of Docker / `usbutils`
-2. Adds your user to `docker` + `plugdev` (optional)
-3. Scans USB for RTL-SDR / RX-888
-4. Prompts: device, image (standard/SoftMBE), admin, TZ, port, data dir
-5. RTL-SDR: optional **rtl_tcp** port publish (`FORWARD_LOCALPORT_…`)
-6. Installs `/etc/modprobe.d/owrx-blacklist.conf` + udev rules
-7. Writes `.env` + `docker-compose.yml`, seeds profiles, starts Compose
+1. Detects an existing install (`.env`, compose, data dir, container) and offers:
+   - **Keep config** — pull & restart only
+   - **Reconfigure** — full prompts again
+   - **Refresh presets** — copy latest `sdrs.json` into the data dir
+   - **Abort**
+2. Verifies Debian host; offers apt install of Docker / `usbutils`
+3. Adds your user to `docker` + `plugdev` (skips if already a member)
+4. Scans USB for RTL-SDR / RX-888
+5. Prompts: device, image (standard/SoftMBE), admin, TZ, port, data dir
+6. RTL-SDR: optional **rtl_tcp** port publish (`FORWARD_LOCALPORT_…`)
+7. Installs blacklist + udev only if not already present
+8. Writes `.env` + `docker-compose.yml`, seeds profiles, starts Compose
 
 ## Helper scripts
 

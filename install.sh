@@ -238,6 +238,70 @@ resolve_compose() {
   fi
 }
 
+container_running() {
+  local name="$1"
+  command -v docker >/dev/null 2>&1 || return 1
+  if docker info >/dev/null 2>&1; then
+    docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$name"
+  elif sudo docker info >/dev/null 2>&1; then
+    sudo docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$name"
+  else
+    return 1
+  fi
+}
+
+container_exists() {
+  local name="$1"
+  command -v docker >/dev/null 2>&1 || return 1
+  if docker info >/dev/null 2>&1; then
+    docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$name"
+  elif sudo docker info >/dev/null 2>&1; then
+    sudo docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$name"
+  else
+    return 1
+  fi
+}
+
+detect_existing_install() {
+  # Sets globals: EXISTING=true/false, EXISTING_* summary fields
+  EXISTING=false
+  EXISTING_REASONS=()
+  if [[ -f "$ROOT/.env" ]]; then
+    EXISTING=true
+    EXISTING_REASONS+=(".env present")
+  fi
+  if [[ -f "$ROOT/docker-compose.yml" ]]; then
+    EXISTING=true
+    EXISTING_REASONS+=("docker-compose.yml present")
+  fi
+  if [[ -f "$ROOT/.env" ]]; then
+    # shellcheck disable=SC1091
+    set -a
+    # shellcheck disable=SC1091
+    source "$ROOT/.env"
+    set +a
+  fi
+  local cname="${OWRX_CONTAINER_NAME:-openwebrxplus}"
+  local ddir="${OWRX_DATA_DIR:-/opt/owrx-docker}"
+  if [[ -d "$ddir/var" ]] || [[ -d "$ddir/etc" ]]; then
+    EXISTING=true
+    EXISTING_REASONS+=("data dir ${ddir}")
+  fi
+  if container_running "$cname"; then
+    EXISTING=true
+    EXISTING_REASONS+=("container ${cname} running")
+  elif container_exists "$cname"; then
+    EXISTING=true
+    EXISTING_REASONS+=("container ${cname} exists (stopped)")
+  fi
+  if [[ -f /etc/modprobe.d/owrx-blacklist.conf ]]; then
+    EXISTING_REASONS+=("host blacklist installed")
+  fi
+  if [[ -f /etc/udev/rules.d/99-sdr-devices.rules ]]; then
+    EXISTING_REASONS+=("host udev rules installed")
+  fi
+}
+
 # ---------- banner ----------
 clear 2>/dev/null || true
 bold "=============================================="
@@ -247,6 +311,94 @@ echo
 info "Image: https://hub.docker.com/r/slechev/openwebrxplus"
 info "Repo:  ${ROOT}"
 echo
+
+# ---------- already configured? ----------
+INSTALL_MODE="fresh"   # fresh | keep | reconfigure | presets
+detect_existing_install
+
+if [[ "$EXISTING" == true ]]; then
+  bold "Existing installation detected"
+  for r in "${EXISTING_REASONS[@]}"; do
+    echo "  • $r"
+  done
+  echo
+  if [[ -f "$ROOT/.env" ]]; then
+    echo "  Container:  ${OWRX_CONTAINER_NAME:-openwebrxplus}"
+    echo "  Device:     ${OWRX_DEVICE:-unknown}"
+    echo "  Image:      ${OWRX_IMAGE:-unknown}"
+    echo "  Port:       ${OWRX_PORT:-8073}"
+    echo "  Data:       ${OWRX_DATA_DIR:-/opt/owrx-docker}"
+    echo "  Admin:      ${OPENWEBRX_ADMIN_USER:-admin}"
+    echo
+  fi
+  echo "  1) Keep config — pull image & (re)start only"
+  echo "  2) Reconfigure — run full installer prompts again"
+  echo "  3) Refresh presets only — copy latest sdrs.json into data dir"
+  echo "  4) Abort"
+  EXISTING_CHOICE=""
+  while [[ -z "$EXISTING_CHOICE" ]]; do
+    prompt EXISTING_CHOICE "Choose [1-4]" "1"
+    case "$EXISTING_CHOICE" in
+      1) INSTALL_MODE="keep" ;;
+      2) INSTALL_MODE="reconfigure" ;;
+      3) INSTALL_MODE="presets" ;;
+      4) warn "Aborted."; exit 0 ;;
+      *) EXISTING_CHOICE=""; warn "Invalid choice." ;;
+    esac
+  done
+  echo
+fi
+
+# ---------- presets-only fast path ----------
+if [[ "$INSTALL_MODE" == "presets" ]]; then
+  if [[ ! -f "$ROOT/.env" ]]; then
+    err "No .env — cannot refresh presets. Choose reconfigure (2) instead."
+    exit 1
+  fi
+  # shellcheck disable=SC1091
+  set -a; source "$ROOT/.env"; set +a
+  DEVICE="${OWRX_DEVICE:-rtl_sdr}"
+  PRESET_SRC="${ROOT}/presets/${DEVICE}/sdrs.json"
+  PRESET_DST="${OWRX_DATA_DIR}/presets"
+  if [[ ! -f "$PRESET_SRC" ]]; then
+    err "No preset file: ${PRESET_SRC}"
+    exit 1
+  fi
+  sudo mkdir -p "$PRESET_DST"
+  sudo cp "$PRESET_SRC" "${PRESET_DST}/sdrs.${DEVICE}.json"
+  sudo cp "$PRESET_SRC" "${PRESET_DST}/sdrs.json"
+  sudo chown -R "${USER}:${USER}" "${OWRX_DATA_DIR}/presets" 2>/dev/null || true
+  ok "Presets refreshed → ${PRESET_DST}/sdrs.json"
+  info "Apply in Admin → Settings → SDR Devices (or merge from that file)."
+  exit 0
+fi
+
+# ---------- keep-config fast path ----------
+if [[ "$INSTALL_MODE" == "keep" ]]; then
+  if [[ ! -f "$ROOT/.env" || ! -f "$ROOT/docker-compose.yml" ]]; then
+    err "Missing .env or docker-compose.yml — choose reconfigure (2)."
+    exit 1
+  fi
+  # shellcheck disable=SC1091
+  set -a; source "$ROOT/.env"; set +a
+  if ! command -v docker >/dev/null 2>&1; then
+    err "Docker not installed. Choose reconfigure or install Docker first."
+    exit 1
+  fi
+  DOCKER="docker"
+  if ! docker info >/dev/null 2>&1; then
+    DOCKER="sudo docker"
+  fi
+  if ! COMPOSE="$(resolve_compose "$DOCKER")"; then
+    err "Docker Compose not found."
+    exit 1
+  fi
+  ok "Using existing config — pulling & starting"
+  run_quiet "Pulling ${OWRX_IMAGE}" "Image pulled" $COMPOSE pull --quiet
+  run_quiet "Starting OpenWebRX+" "Container started" $COMPOSE up -d --quiet-pull
+  ok "Ready → http://localhost:${OWRX_PORT:-8073}"
+  exit 0
+fi
 
 # ---------- prerequisites ----------
 bold "1) Prerequisites (native Debian)"
@@ -308,9 +460,16 @@ ok "Compose OK: $($COMPOSE version 2>/dev/null | head -n1)"
 if is_debian_like && ! getent group plugdev >/dev/null; then
   sudo groupadd plugdev
 fi
-if is_debian_like && confirm "Add user $USER to groups docker + plugdev?" y; then
-  sudo usermod -aG docker,plugdev "$USER" || sudo usermod -aG docker "$USER"
-  warn "Group change applies after you log out and back in."
+if is_debian_like; then
+  NEED_GROUPS=()
+  id -nG "$USER" | grep -qw docker || NEED_GROUPS+=(docker)
+  id -nG "$USER" | grep -qw plugdev || NEED_GROUPS+=(plugdev)
+  if [[ ${#NEED_GROUPS[@]} -eq 0 ]]; then
+    ok "User ${USER} already in docker + plugdev"
+  elif confirm "Add user $USER to groups: ${NEED_GROUPS[*]}?" y; then
+    sudo usermod -aG "$(IFS=,; echo "${NEED_GROUPS[*]}")" "$USER"
+    warn "Group change applies after you log out and back in."
+  fi
 fi
 echo
 
@@ -463,11 +622,19 @@ echo
 bold "8) Host preparation (Debian blacklist + udev)"
 DO_BLACKLIST=false
 DO_UDEV=false
-if confirm "Install kernel module blacklist for SDR drivers? (recommended)" y; then
-  DO_BLACKLIST=true
+if [[ -f /etc/modprobe.d/owrx-blacklist.conf ]]; then
+  ok "Blacklist already installed — keeping"
+else
+  if confirm "Install kernel module blacklist for SDR drivers? (recommended)" y; then
+    DO_BLACKLIST=true
+  fi
 fi
-if confirm "Install udev rules for SDR USB permissions? (recommended)" y; then
-  DO_UDEV=true
+if [[ -f /etc/udev/rules.d/99-sdr-devices.rules ]]; then
+  ok "Udev rules already installed — keeping"
+else
+  if confirm "Install udev rules for SDR USB permissions? (recommended)" y; then
+    DO_UDEV=true
+  fi
 fi
 echo
 
