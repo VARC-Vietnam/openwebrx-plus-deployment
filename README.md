@@ -114,7 +114,8 @@ To change **only** which profiles are available (no reconfigure):
 # or: ./install.sh  →  option 3) Select profiles only
 ```
 
-Controls: **↑/↓** move, **Space** toggle, **a** all, **n** none, **Enter** confirm, **q** cancel.
+Controls: **↑/↓** move, **Space** toggle, **a** all, **n** none, **Enter** confirm, **q** cancel.  
+Profiles are listed by frequency; selected rows use a brighter color than unselected.
 
 ### Background FT8 (no browser required)
 

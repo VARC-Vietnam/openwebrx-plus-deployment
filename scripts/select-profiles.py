@@ -24,9 +24,43 @@ def load_preset(path: Path) -> tuple[str, dict, dict]:
     return dev_id, device, profiles
 
 
+def profile_freq_hz(prof: dict) -> float:
+    """Sort key: center_freq, else start_freq (Hz)."""
+    if not isinstance(prof, dict):
+        return float("inf")
+    for key in ("center_freq", "start_freq"):
+        val = prof.get(key)
+        if isinstance(val, (int, float)):
+            return float(val)
+    return float("inf")
+
+
+def format_freq(hz: float) -> str:
+    if hz == float("inf"):
+        return "—".rjust(12)
+    if hz >= 1e9:
+        return f"{hz / 1e9:8.3f} GHz"
+    if hz >= 1e6:
+        return f"{hz / 1e6:8.3f} MHz"
+    if hz >= 1e3:
+        return f"{hz / 1e3:8.3f} kHz"
+    return f"{hz:8.0f} Hz"
+
+
+def sorted_profile_items(profiles: dict) -> list[list]:
+    """Build [pid, name, selected, freq_hz] sorted by frequency ascending."""
+    items = []
+    for pid, p in profiles.items():
+        name = str((p or {}).get("name") or pid)
+        freq = profile_freq_hz(p or {})
+        items.append([pid, name, True, freq])
+    items.sort(key=lambda row: (row[3], row[1].lower()))
+    return items
+
+
 def interactive_select_curses(stdscr, items: list[list]) -> list[str] | None:
     """
-    items: list of [pid, name, selected:bool]
+    items: list of [pid, name, selected:bool, freq_hz]
     Returns list of selected pids, or None if cancelled.
     """
     curses.curs_set(0)
@@ -34,9 +68,16 @@ def interactive_select_curses(stdscr, items: list[list]) -> list[str] | None:
     if curses.has_colors():
         curses.start_color()
         curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_CYAN)  # cursor
-        curses.init_pair(2, curses.COLOR_GREEN, -1)  # checked
-        curses.init_pair(3, curses.COLOR_YELLOW, -1)  # header
+        # 1: cursor on selected (bright)
+        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_CYAN)
+        # 2: selected (bright)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+        # 3: header
+        curses.init_pair(3, curses.COLOR_YELLOW, -1)
+        # 4: unselected (dimmer)
+        curses.init_pair(4, curses.COLOR_BLUE, -1)
+        # 5: cursor on unselected
+        curses.init_pair(5, curses.COLOR_BLACK, curses.COLOR_BLUE)
 
     cursor = 0
     scroll = 0
@@ -60,9 +101,9 @@ def interactive_select_curses(stdscr, items: list[list]) -> list[str] | None:
                 return
             stdscr.addnstr(y, x, text, max(0, width - x - 1), attr)
 
-        put(0, 0, "=" * min(width - 1, 46), curses.color_pair(3) | curses.A_BOLD)
-        put(1, 0, "  Select profiles to enable", curses.color_pair(3) | curses.A_BOLD)
-        put(2, 0, "=" * min(width - 1, 46), curses.color_pair(3) | curses.A_BOLD)
+        put(0, 0, "=" * min(width - 1, 56), curses.color_pair(3) | curses.A_BOLD)
+        put(1, 0, "  Select profiles to enable  (sorted by frequency)", curses.color_pair(3) | curses.A_BOLD)
+        put(2, 0, "=" * min(width - 1, 56), curses.color_pair(3) | curses.A_BOLD)
         put(4, 0, "  ↑/↓ move   Space toggle   a all   n none")
         put(5, 0, "  Enter confirm   q cancel")
 
@@ -70,19 +111,24 @@ def interactive_select_curses(stdscr, items: list[list]) -> list[str] | None:
             idx = scroll + row
             if idx >= len(items):
                 break
-            _pid, name, on = items[idx]
+            _pid, name, on, freq = items[idx]
             mark = "x" if on else " "
-            line = f"  [{mark}] {idx + 1:2d}) {name}"
+            freq_s = format_freq(freq)
+            line = f"  [{mark}] {freq_s}  {name}"
             y = header_lines + row
-            if idx == cursor:
+            if idx == cursor and on:
                 attr = curses.color_pair(1) | curses.A_BOLD
+            elif idx == cursor:
+                attr = curses.color_pair(5) | curses.A_BOLD
             elif on:
-                attr = curses.color_pair(2)
+                # Selected: bright white + bold
+                attr = curses.color_pair(2) | curses.A_BOLD
             else:
-                attr = 0
-            put(y, 0, line.ljust(min(width - 1, 60)), attr)
+                # Unselected: dimmer
+                attr = curses.color_pair(4) | curses.A_DIM
+            put(y, 0, line.ljust(min(width - 1, 72)), attr)
 
-        selected = sum(1 for *_, on in items if on)
+        selected = sum(1 for item in items if item[2])
         put(height - 2, 0, f"  Selected: {selected}/{len(items)}   {status}")
 
         stdscr.refresh()
@@ -114,7 +160,7 @@ def interactive_select_curses(stdscr, items: list[list]) -> list[str] | None:
         elif key in (ord("q"), 27):  # q or ESC
             return None
         elif key in (curses.KEY_ENTER, 10, 13):
-            chosen = [pid for pid, _name, on in items if on]
+            chosen = [pid for pid, _name, on, _freq in items if on]
             if not chosen:
                 status = "select at least one"
                 continue
@@ -122,11 +168,11 @@ def interactive_select_curses(stdscr, items: list[list]) -> list[str] | None:
 
 
 def interactive_select(profiles: dict) -> list[str]:
-    items = [[pid, str((p or {}).get("name") or pid), True] for pid, p in profiles.items()]
+    items = sorted_profile_items(profiles)
 
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        # Non-TTY fallback: keep all
-        return [pid for pid, _n, _on in items]
+        # Non-TTY fallback: keep all (frequency order)
+        return [pid for pid, _n, _on, _f in items]
 
     def _wrap(stdscr):
         return interactive_select_curses(stdscr, items)
@@ -149,7 +195,12 @@ def filter_preset(data: dict, selected: set[str]) -> dict:
         profiles = device.get("profiles") or {}
         if not isinstance(profiles, dict):
             continue
-        device["profiles"] = {k: v for k, v in profiles.items() if k in selected}
+        # Keep selected profiles in frequency order
+        ordered = sorted(
+            ((k, v) for k, v in profiles.items() if k in selected),
+            key=lambda kv: profile_freq_hz(kv[1] if isinstance(kv[1], dict) else {}),
+        )
+        device["profiles"] = {k: v for k, v in ordered}
 
         # Drop schedule entries that point at removed profiles
         sched = device.get("scheduler") or {}
