@@ -19,6 +19,16 @@ warn()  { printf '%s%s%s\n' "$YLW" "$*" "$RST"; }
 err()   { printf '%s%s%s\n' "$RED" "$*" "$RST" >&2; }
 bold()  { printf '%s%s%s\n' "$BLD" "$*" "$RST"; }
 
+# Clear screen and show only the current installer step.
+step() {
+  local num="$1" title="$2"
+  clear 2>/dev/null || printf '\033c'
+  bold "=============================================="
+  bold "  OpenWebRX+  —  Step ${num}: ${title}"
+  bold "=============================================="
+  echo
+}
+
 prompt() {
   # prompt VAR "Question" "default"
   local __var="$1" __q="$2" __def="${3-}" __ans
@@ -324,22 +334,14 @@ detect_existing_install() {
   fi
 }
 
-# ---------- banner ----------
-clear 2>/dev/null || true
-bold "=============================================="
-bold "  OpenWebRX+ Docker Deployment (Debian)"
-bold "=============================================="
-echo
-info "Image: https://hub.docker.com/r/slechev/openwebrxplus"
-info "Repo:  ${ROOT}"
-echo
-
 # ---------- already configured? ----------
 INSTALL_MODE="fresh"   # fresh | keep | reconfigure | presets
 detect_existing_install
 
 if [[ "$EXISTING" == true ]]; then
-  bold "Existing installation detected"
+  step "0" "Existing installation"
+  info "Repo: ${ROOT}"
+  echo
   for r in "${EXISTING_REASONS[@]}"; do
     echo "  • $r"
   done
@@ -368,16 +370,17 @@ if [[ "$EXISTING" == true ]]; then
       *) EXISTING_CHOICE=""; warn "Invalid choice." ;;
     esac
   done
-  echo
 fi
 
 # ---------- presets-only fast path ----------
 if [[ "$INSTALL_MODE" == "presets" ]]; then
+  step "…" "Refresh presets"
   if [[ ! -f "$ROOT/.env" ]]; then
     err "No .env — cannot refresh presets. Choose reconfigure (2) instead."
     exit 1
   fi
-  bold "Refreshing presets (RTL/RX-888 only — drop Airspy/SDRPlay)"
+  info "RTL/RX-888 only — drop Airspy/SDRPlay"
+  echo
   "$ROOT/scripts/apply-presets.sh"
   ok "Presets applied to live settings."
   exit 0
@@ -385,6 +388,7 @@ fi
 
 # ---------- keep-config fast path ----------
 if [[ "$INSTALL_MODE" == "keep" ]]; then
+  step "…" "Keep config — pull & start"
   if [[ ! -f "$ROOT/.env" || ! -f "$ROOT/docker-compose.yml" ]]; then
     err "Missing .env or docker-compose.yml — choose reconfigure (2)."
     exit 1
@@ -403,7 +407,6 @@ if [[ "$INSTALL_MODE" == "keep" ]]; then
     err "Docker Compose not found."
     exit 1
   fi
-  ok "Using existing config — pulling & starting"
   run_quiet "Pulling ${OWRX_IMAGE}" "Image pulled" $COMPOSE pull --quiet
   run_quiet "Starting OpenWebRX+" "Container started" $COMPOSE up -d --quiet-pull
   ok "Ready → http://localhost:${OWRX_PORT:-8073}"
@@ -411,7 +414,7 @@ if [[ "$INSTALL_MODE" == "keep" ]]; then
 fi
 
 # ---------- prerequisites ----------
-bold "1) Prerequisites (native Debian)"
+step "1/10" "Prerequisites"
 if [[ "$(uname -s)" != "Linux" ]]; then
   err "This installer targets a native Debian Linux host (USB SDR passthrough)."
   exit 1
@@ -482,20 +485,23 @@ if is_debian_like; then
   fi
 fi
 echo
+read -r -p "Press Enter to continue..." _ || true
 
 # ---------- detect devices ----------
-bold "2) Detect plugged USB SDR devices"
+step "2/10" "Detect plugged USB SDR devices"
 if [[ -x "$ROOT/scripts/detect-usb.sh" ]]; then
   "$ROOT/scripts/detect-usb.sh" || warn "No known devices detected yet — you can still continue."
 else
   warn "detect-usb.sh missing; skipping."
 fi
 echo
+read -r -p "Press Enter to continue..." _ || true
 
 # ---------- device selection ----------
-bold "3) Select supported device"
+step "3/10" "Select supported device"
 echo "  1) RTL-SDR          (rtl_sdr — bind /dev/bus/usb, optional rtl_tcp)"
 echo "  2) RX-888 / SDDC    (sddc_soapy — bind /dev/bus/usb)"
+echo
 DEVICE_CHOICE=""
 while [[ -z "$DEVICE_CHOICE" ]]; do
   prompt DEVICE_CHOICE "Choose device [1-2]" "1"
@@ -506,12 +512,13 @@ while [[ -z "$DEVICE_CHOICE" ]]; do
   esac
 done
 ok "Selected: ${DEVICE_LABEL} (${OWRX_DEVICE})"
-echo
+sleep 0.6
 
 # ---------- image / softmbe ----------
-bold "4) Docker image"
+step "4/10" "Docker image"
 echo "  1) slechev/openwebrxplus          (standard)"
 echo "  2) slechev/openwebrxplus-softmbe  (includes SoftMBE digital voice)"
+echo
 IMAGE_CHOICE=""
 while [[ -z "$IMAGE_CHOICE" ]]; do
   prompt IMAGE_CHOICE "Choose image [1-2]" "1"
@@ -522,10 +529,10 @@ while [[ -z "$IMAGE_CHOICE" ]]; do
   esac
 done
 ok "Image: ${OWRX_IMAGE}"
-echo
+sleep 0.6
 
 # ---------- admin / presets ----------
-bold "5) Presets — admin, timezone, ports, profiles"
+step "5/10" "Admin, timezone, ports, data"
 DEFAULT_TZ="$(detect_debian_tz)"
 prompt OWRX_CONTAINER_NAME "Container name" "openwebrxplus"
 prompt OWRX_PORT "Web UI host port" "8073"
@@ -555,14 +562,15 @@ FORWARD_RTL_TCP_EXTERNAL=""
 EXTRA_PORTS=""
 EXTRA_ENV=""
 
-bold "6) Device binding / rtl_tcp"
+step "6/10" "Device binding / rtl_tcp"
 info "USB devices are always bound via /dev/bus/usb into the container."
+echo
 
 if [[ "$OWRX_DEVICE" == "rtl_sdr" ]]; then
-  echo
   info "RTL-SDR options:"
   echo "  • Direct USB (recommended) — OpenWebRX talks to the dongle inside Docker"
   echo "  • Also expose rtl_tcp-compatible port (FORWARD_LOCALPORT) for external clients"
+  echo
   if confirm "Enable rtl_tcp port forwarding from the container?" n; then
     ENABLE_RTL_TCP=true
     prompt FORWARD_LOCALPORT_INTERNAL "Internal rtl_tcp port (OWRX settings / rtltcp_compat)" "1234"
@@ -581,10 +589,10 @@ else
   warn "RX-888 uses SoapySDDC inside the image (CPU-heavy; not ideal on Pi-class hosts)."
   ok "USB bus will be passed through; no rtl_tcp forwarding for RX-888."
 fi
-echo
+sleep 0.6
 
 # ---------- healthcheck ----------
-bold "7) Health checks"
+step "7/10" "Health checks"
 HEALTHCHECK_SDR_DEVICES=1
 HEALTHCHECK_USB=""
 case "$OWRX_DEVICE" in
@@ -629,7 +637,7 @@ fi
 echo
 
 # ---------- host prep ----------
-bold "8) Host preparation (Debian blacklist + udev)"
+step "8/10" "Host preparation (blacklist + udev)"
 DO_BLACKLIST=false
 DO_UDEV=false
 if [[ -f /etc/modprobe.d/owrx-blacklist.conf ]]; then
@@ -646,10 +654,10 @@ else
     DO_UDEV=true
   fi
 fi
-echo
+sleep 0.6
 
 # ---------- summary ----------
-bold "9) Summary"
+step "9/10" "Summary"
 cat <<EOF
   Device:        ${DEVICE_LABEL} (${OWRX_DEVICE})
   Image:         ${OWRX_IMAGE}
@@ -822,7 +830,7 @@ fi
 echo
 
 # ---------- pull & start ----------
-bold "10) Pull image & start container"
+step "10/10" "Pull image & start container"
 COMPOSE="${COMPOSE:-docker compose}"
 if confirm "Pull image and start OpenWebRX+ now?" y; then
   run_quiet "Pulling ${OWRX_IMAGE}" "Image pulled" \
