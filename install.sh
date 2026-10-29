@@ -58,6 +58,77 @@ need_cmd() {
   }
 }
 
+# ---------- quiet progress (spinner) ----------
+SPIN_PID=""
+trap 'spin_clear' EXIT
+
+spin_start() {
+  local msg="$1"
+  # Keep one updating line; hide cursor while spinning
+  printf '\033[?25l' 2>/dev/null || true
+  (
+    local frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0
+    while true; do
+      printf '\r%s%s %s%s' "$CYN" "${frames:i++%10:1}" "$msg" "$RST"
+      sleep 0.08
+    done
+  ) &
+  SPIN_PID=$!
+  disown "$SPIN_PID" 2>/dev/null || true
+}
+
+spin_clear() {
+  if [[ -n "${SPIN_PID:-}" ]]; then
+    kill "$SPIN_PID" 2>/dev/null || true
+    wait "$SPIN_PID" 2>/dev/null || true
+    SPIN_PID=""
+  fi
+  printf '\r\033[K\033[?25h' 2>/dev/null || true
+}
+
+# run_quiet "Working on X..." "X done" -- cmd args...
+# Captures cmd output; on failure shows last ~12 lines only.
+run_quiet() {
+  local msg="$1" done_msg="$2"
+  shift 2
+  local log rc=0
+  log="$(mktemp)"
+  spin_start "$msg"
+  set +e
+  "$@" >"$log" 2>&1
+  rc=$?
+  set -e
+  spin_clear
+  if [[ $rc -eq 0 ]]; then
+    ok "$done_msg"
+    rm -f "$log"
+    return 0
+  fi
+  err "$msg — failed"
+  if [[ -s "$log" ]]; then
+    err "----"
+    tail -n 12 "$log" | sed 's/^/  /' >&2 || true
+    err "----"
+  fi
+  rm -f "$log"
+  return "$rc"
+}
+
+apt_update_quiet() {
+  run_quiet "Updating apt indexes" "Apt indexes updated" \
+    sudo apt-get update -qq
+}
+
+apt_install_quiet() {
+  local pkgs=("$@")
+  [[ ${#pkgs[@]} -eq 0 ]] && return 0
+  run_quiet "Installing ${pkgs[*]}" "Installed ${pkgs[*]}" \
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+      -o Dpkg::Use-Pty=0 \
+      -o APT::Color=0 \
+      "${pkgs[@]}"
+}
+
 detect_debian_tz() {
   if [[ -f /etc/timezone ]]; then
     tr -d '[:space:]' </etc/timezone
@@ -97,18 +168,17 @@ ensure_debian_packages() {
     fi
   done
   if [[ ${#unavailable[@]} -gt 0 ]]; then
-    warn "Not in apt for this Debian release: ${unavailable[*]}"
+    warn "Skip (not in apt): ${unavailable[*]}"
   fi
   if [[ ${#missing[@]} -eq 0 ]]; then
     [[ ${#unavailable[@]} -eq 0 ]]
     return $?
   fi
-  warn "Missing Debian packages: ${missing[*]}"
-  if confirm "Install with apt now? (sudo)" y; then
-    sudo apt-get update
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"
+  if confirm "Install missing packages (${missing[*]})?" y; then
+    apt_update_quiet
+    apt_install_quiet "${missing[@]}"
   else
-    err "Install packages manually: sudo apt-get install -y ${missing[*]}"
+    err "Install manually: sudo apt-get install -y ${missing[*]}"
     return 1
   fi
 }
@@ -116,18 +186,17 @@ ensure_debian_packages() {
 install_docker_debian() {
   # Debian Trixie: docker.io + docker-compose (Compose v2)
   # Note: docker-compose-v2 / docker-compose-plugin are NOT in Trixie apt.
-  sudo apt-get update
+  apt_update_quiet
 
-  if ! need_cmd docker; then
+  if ! command -v docker >/dev/null 2>&1; then
     if pkg_available docker.io; then
-      info "Installing docker.io..."
-      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io
+      apt_install_quiet docker.io
     else
       err "Package docker.io is not available. Enable the main apt suite or install Docker CE."
       return 1
     fi
   fi
-  if ! need_cmd docker; then
+  if ! command -v docker >/dev/null 2>&1; then
     err "Docker engine install failed (docker binary still missing)."
     return 1
   fi
@@ -136,8 +205,7 @@ install_docker_debian() {
     local compose_pkg=""
     for compose_pkg in docker-compose docker-compose-v2 docker-compose-plugin; do
       if pkg_available "$compose_pkg"; then
-        info "Installing ${compose_pkg}..."
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$compose_pkg"
+        apt_install_quiet "$compose_pkg"
         break
       fi
     done
@@ -149,8 +217,9 @@ install_docker_debian() {
     return 1
   fi
 
-  sudo systemctl enable --now docker
-  ok "Docker engine + Compose installed."
+  run_quiet "Enabling docker service" "Docker service running" \
+    sudo systemctl enable --now docker
+  ok "Docker ready."
 }
 
 resolve_compose() {
@@ -196,26 +265,23 @@ if is_debian_like; then
   ensure_debian_packages usbutils udev ca-certificates curl || true
 fi
 
-if ! need_cmd docker; then
+if ! command -v docker >/dev/null 2>&1; then
   if is_debian_like && confirm "Docker not found. Install docker.io + docker-compose via apt?" y; then
     install_docker_debian || exit 1
   else
-    err "Install Docker Engine on Debian, then re-run:"
-    err "  sudo apt-get install -y docker.io docker-compose"
-    err "  sudo systemctl enable --now docker"
-    err "  sudo usermod -aG docker \"\$USER\"  # then log out/in"
+    err "Install: sudo apt-get install -y docker.io docker-compose && sudo systemctl enable --now docker"
     exit 1
   fi
 elif ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
   if is_debian_like && confirm "Docker Compose missing. Install docker-compose via apt?" y; then
     install_docker_debian || exit 1
   else
-    err "On Debian Trixie: sudo apt-get install -y docker-compose"
+    err "Install: sudo apt-get install -y docker-compose"
     exit 1
   fi
 fi
 
-ok "Docker OK: $(docker --version)"
+ok "Docker $(docker --version | awk '{print $3}' | tr -d ',')"
 
 # Socket permission check
 DOCKER="docker"
@@ -574,41 +640,31 @@ echo
 
 # ---------- pull & start ----------
 bold "10) Pull image & start container"
-# Default COMPOSE if prerequisites path set DOCKER/COMPOSE earlier
 COMPOSE="${COMPOSE:-docker compose}"
 if confirm "Pull image and start OpenWebRX+ now?" y; then
-  $COMPOSE pull
+  run_quiet "Pulling ${OWRX_IMAGE}" "Image pulled" \
+    $COMPOSE pull --quiet
   if [[ "$ENABLE_AUTOHEAL" == true ]]; then
-    $COMPOSE --profile autoheal up -d
+    run_quiet "Starting containers (+ autoheal)" "Containers started" \
+      $COMPOSE --profile autoheal up -d --quiet-pull
   else
-    $COMPOSE up -d
+    run_quiet "Starting OpenWebRX+" "Container started" \
+      $COMPOSE up -d --quiet-pull
   fi
   echo
-  ok "Container started."
-  info "Web UI:  http://localhost:${OWRX_PORT}"
-  info "Login:   ${OPENWEBRX_ADMIN_USER} / (password you set)"
-  info "Logs:    $COMPOSE logs -f openwebrx"
-  info "Status:  ./scripts/status.sh"
-  info "Stop:    ./scripts/stop.sh"
+  ok "Ready → http://localhost:${OWRX_PORT}  (user: ${OPENWEBRX_ADMIN_USER})"
+  info "Logs: $COMPOSE logs -f openwebrx"
   echo
-  bold "Next steps"
-  echo "  1. Open the web UI and sign in as admin."
-  echo "  2. Go to Settings → SDR Devices and Profiles."
-  case "$OWRX_DEVICE" in
-    rtl_sdr)
-      echo "  3. Enable/configure the RTL-SDR device (preset reference: ${PRESET_DST})."
-      echo "     For rtl_tcp clients, ensure rtltcp_compat/port matches ${FORWARD_LOCALPORT_INTERNAL:-1234}."
-      ;;
-    rx888)
-      echo "  3. Add/enable an RX-888 device with type sddc_soapy (preset: ${PRESET_DST})."
-      echo "     If the device is missing, restart the container after USB plug-in."
-      ;;
-  esac
+  bold "Next"
+  echo "  Admin → Settings → SDR Devices  (preset: ${PRESET_DST})"
+  if [[ "$OWRX_DEVICE" == "rtl_sdr" && "$ENABLE_RTL_TCP" == true ]]; then
+    echo "  rtl_tcp host port: ${FORWARD_RTL_TCP_EXTERNAL} (internal ${FORWARD_LOCALPORT_INTERNAL})"
+  fi
   if [[ "$DO_BLACKLIST" == true ]]; then
-    echo "  4. Reboot the host if the SDR is not detected (blacklist needs reboot)."
+    echo "  Reboot if the SDR is still not claimed."
   fi
 else
-  ok "Config written. Start later with: ./scripts/start.sh"
+  ok "Config written. Start later: ./scripts/start.sh"
 fi
 
 echo
