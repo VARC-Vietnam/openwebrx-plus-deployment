@@ -86,8 +86,26 @@ spin_clear() {
   printf '\r\033[K\033[?25h' 2>/dev/null || true
 }
 
+# Ask for sudo on a clean line (never while the spinner is running).
+ensure_sudo() {
+  spin_clear
+  if sudo -n true 2>/dev/null; then
+    return 0
+  fi
+  printf '\n'
+  info "Administrator password required for the next steps."
+  # Prompt on the real TTY so it never shares a line with the spinner / redirected logs
+  if ! sudo -v </dev/tty >/dev/tty 2>/dev/tty; then
+    err "sudo authentication failed"
+    return 1
+  fi
+  ok "sudo authenticated"
+  printf '\n'
+}
+
 # run_quiet "Working on X..." "X done" -- cmd args...
 # Captures cmd output; on failure shows last ~12 lines only.
+# Callers that need sudo must run ensure_sudo first (never prompt under the spinner).
 run_quiet() {
   local msg="$1" done_msg="$2"
   shift 2
@@ -115,6 +133,7 @@ run_quiet() {
 }
 
 apt_update_quiet() {
+  ensure_sudo || return 1
   run_quiet "Updating apt indexes" "Apt indexes updated" \
     sudo apt-get update -qq
 }
@@ -122,6 +141,7 @@ apt_update_quiet() {
 apt_install_quiet() {
   local pkgs=("$@")
   [[ ${#pkgs[@]} -eq 0 ]] && return 0
+  ensure_sudo || return 1
   run_quiet "Installing ${pkgs[*]}" "Installed ${pkgs[*]}" \
     sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
       -o Dpkg::Use-Pty=0 \
@@ -186,6 +206,7 @@ ensure_debian_packages() {
 install_docker_debian() {
   # Debian Trixie: docker.io + docker-compose (Compose v2)
   # Note: docker-compose-v2 / docker-compose-plugin are NOT in Trixie apt.
+  ensure_sudo || return 1
   apt_update_quiet
 
   if ! command -v docker >/dev/null 2>&1; then
@@ -217,6 +238,7 @@ install_docker_debian() {
     return 1
   fi
 
+  ensure_sudo || return 1
   run_quiet "Enabling docker service" "Docker service running" \
     sudo systemctl enable --now docker
   ok "Docker ready."
