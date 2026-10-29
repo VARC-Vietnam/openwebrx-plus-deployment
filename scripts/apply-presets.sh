@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Apply device presets into live OpenWebRX+ settings.json
-# and strip Airspy HF+ / SDRPlay defaults.
+# Apply device presets into live OpenWebRX+ settings.json (full sdrs replace).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck disable=SC1091
@@ -24,24 +23,42 @@ if [[ ! -f "$PRESET" ]]; then
   echo "Preset not found: ${PRESET}"
   exit 1
 fi
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required"
+  exit 1
+fi
 
 mkdir -p "${OWRX_DATA_DIR}/presets" "$VAR_DIR"
 cp "$PRESET" "${OWRX_DATA_DIR}/presets/sdrs.${DEVICE}.json"
 cp "$PRESET" "${OWRX_DATA_DIR}/presets/sdrs.json"
 
+DOCKER=""
+COMPOSE=""
+WAS_RUNNING=false
+if DOCKER="$(resolve_docker 2>/dev/null)"; then
+  COMPOSE="$(resolve_compose "$DOCKER" 2>/dev/null || true)"
+  if $DOCKER ps --format '{{.Names}}' 2>/dev/null | grep -qx "${OWRX_CONTAINER_NAME}"; then
+    WAS_RUNNING=true
+    echo "Stopping ${OWRX_CONTAINER_NAME} to rewrite settings..."
+    $DOCKER stop "${OWRX_CONTAINER_NAME}" >/dev/null
+  fi
+fi
+
+echo "Applying preset → ${VAR_DIR}/settings.json"
 python3 "$ROOT/scripts/apply-presets.py" --var-dir "$VAR_DIR" --preset "$PRESET"
 
-# Also scrub /etc/openwebrx if a settings copy exists there
+# Scrub etc copy if present
 if [[ -d "${OWRX_DATA_DIR}/etc" ]]; then
   python3 "$ROOT/scripts/apply-presets.py" --var-dir "${OWRX_DATA_DIR}/etc" --preset "$PRESET" 2>/dev/null || true
 fi
 
-# Restart so OWRX reloads devices (if stack is up)
-if DOCKER="$(resolve_docker 2>/dev/null)"; then
-  if COMPOSE="$(resolve_compose "$DOCKER" 2>/dev/null)" && [[ -f "$ROOT/docker-compose.yml" ]]; then
-    $COMPOSE up -d --quiet-pull >/dev/null 2>&1 || true
-    $DOCKER restart "${OWRX_CONTAINER_NAME}" >/dev/null 2>&1 || true
+if [[ "$WAS_RUNNING" == true && -n "$DOCKER" ]]; then
+  echo "Starting ${OWRX_CONTAINER_NAME}..."
+  if [[ -n "$COMPOSE" && -f "$ROOT/docker-compose.yml" ]]; then
+    $COMPOSE up -d --quiet-pull >/dev/null
+  else
+    $DOCKER start "${OWRX_CONTAINER_NAME}" >/dev/null
   fi
 fi
 
-echo "Done. Airspy/SDRPlay removed; only ${DEVICE} presets kept."
+echo "Done — HAMVN + HF + ISS profiles loaded; Airspy/SDRPlay removed."

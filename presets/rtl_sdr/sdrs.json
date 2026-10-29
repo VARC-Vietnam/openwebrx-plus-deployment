@@ -63,6 +63,16 @@
         "tuning_step": 5000,
         "rf_gain": 49.6
       },
+      "40m_lsb": {
+        "name": "40m LSB",
+        "center_freq": 7100000,
+        "samp_rate": 2400000,
+        "start_freq": 7150000,
+        "start_mod": "lsb",
+        "tuning_step": 100,
+        "direct_sampling": 2,
+        "rf_gain": 49.6
+      },
       "40m_ft8": {
         "name": "40m FT8",
         "center_freq": 7074000,
@@ -80,6 +90,16 @@
         "start_freq": 7047500,
         "start_mod": "usb",
         "tuning_step": 10,
+        "direct_sampling": 2,
+        "rf_gain": 49.6
+      },
+      "20m_usb": {
+        "name": "20m USB",
+        "center_freq": 14150000,
+        "samp_rate": 2400000,
+        "start_freq": 14200000,
+        "start_mod": "usb",
+        "tuning_step": 100,
         "direct_sampling": 2,
         "rf_gain": 49.6
       },
@@ -101,6 +121,15 @@
         "start_mod": "usb",
         "tuning_step": 10,
         "direct_sampling": 2,
+        "rf_gain": 49.6
+      },
+      "10m_usb": {
+        "name": "10m USB",
+        "center_freq": 28300000,
+        "samp_rate": 2400000,
+        "start_freq": 28350000,
+        "start_mod": "usb",
+        "tuning_step": 100,
         "rf_gain": 49.6
       },
       "10m_ft8": {

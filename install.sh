@@ -813,14 +813,11 @@ if confirm "Pull image and start OpenWebRX+ now?" y; then
       $COMPOSE up -d --quiet-pull
   fi
 
-  # OWRX may recreate default Airspy/SDRPlay on first boot — scrub again & restart
+  # Re-apply after first boot so OWRX defaults (Airspy/SDRPlay) cannot stick
   if [[ -f "$PRESET_SRC" ]] && command -v python3 >/dev/null 2>&1; then
-    sleep 3
-    python3 "$ROOT/scripts/apply-presets.py" \
-      --var-dir "${OWRX_DATA_DIR}/var" \
-      --preset "$PRESET_SRC" >/dev/null 2>&1 || true
-    $DOCKER restart "${OWRX_CONTAINER_NAME}" >/dev/null 2>&1 || true
-    ok "Profiles locked to ${DEVICE_LABEL} (Airspy/SDRPlay removed)"
+    sleep 4
+    "$ROOT/scripts/apply-presets.sh"
+    ok "Profiles locked to ${DEVICE_LABEL} (HAMVN + HF + ISS)"
   fi
 
   echo

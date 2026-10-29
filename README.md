@@ -80,7 +80,7 @@ Stops containers, removes OpenWebRX+/autoheal images, deletes generated `.env` /
 - USB: `0bda:2832`, `0bda:2838`, …
 - Host DVB drivers blacklisted so Docker can claim the stick
 - Optional rtl_tcp: e.g. container `1234` → host `5678`
-- Profiles: `presets/rtl_sdr/sdrs.json` — HAMVN 2m/70cm, HF FT8/FT4 (10/20/40m), ISS voice/SSTV/FM repeater/APRS
+- Profiles: `presets/rtl_sdr/sdrs.json` — HAMVN 2m/70cm, HF 10/20/40 (LSB/USB + FT8/FT4), ISS voice/SSTV/FM/APRS
 
 ### RX-888
 
