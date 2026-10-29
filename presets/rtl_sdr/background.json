@@ -1,4 +1,4 @@
 {
   "services_enabled": true,
-  "services_decoders": ["ft8"]
+  "services_decoders": ["ft8", "ft4", "sstv", "packet"]
 }

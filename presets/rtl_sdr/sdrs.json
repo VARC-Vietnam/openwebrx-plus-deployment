@@ -86,7 +86,7 @@
         "center_freq": 7074000,
         "samp_rate": 2400000,
         "start_freq": 7074000,
-        "start_mod": "usb",
+        "start_mod": "ft8",
         "tuning_step": 10,
         "direct_sampling": 2,
         "rf_gain": 49.6
@@ -96,7 +96,7 @@
         "center_freq": 7047500,
         "samp_rate": 2400000,
         "start_freq": 7047500,
-        "start_mod": "usb",
+        "start_mod": "ft4",
         "tuning_step": 10,
         "direct_sampling": 2,
         "rf_gain": 49.6
@@ -116,7 +116,7 @@
         "center_freq": 14074000,
         "samp_rate": 2400000,
         "start_freq": 14074000,
-        "start_mod": "usb",
+        "start_mod": "ft8",
         "tuning_step": 10,
         "direct_sampling": 2,
         "rf_gain": 49.6
@@ -126,7 +126,7 @@
         "center_freq": 14080000,
         "samp_rate": 2400000,
         "start_freq": 14080000,
-        "start_mod": "usb",
+        "start_mod": "ft4",
         "tuning_step": 10,
         "direct_sampling": 2,
         "rf_gain": 49.6
@@ -145,7 +145,7 @@
         "center_freq": 28074000,
         "samp_rate": 2400000,
         "start_freq": 28074000,
-        "start_mod": "usb",
+        "start_mod": "ft8",
         "tuning_step": 10,
         "rf_gain": 49.6
       },
@@ -154,7 +154,7 @@
         "center_freq": 28180000,
         "samp_rate": 2400000,
         "start_freq": 28180000,
-        "start_mod": "usb",
+        "start_mod": "ft4",
         "tuning_step": 10,
         "rf_gain": 49.6
       },
@@ -189,8 +189,8 @@
         "name": "ISS SSTV",
         "center_freq": 437550000,
         "samp_rate": 2400000,
-        "start_freq": 437550000,
-        "start_mod": "nfm",
+        "start_freq": 437548100,
+        "start_mod": "sstv",
         "tuning_step": 1000,
         "rf_gain": 49.6
       },
@@ -198,8 +198,8 @@
         "name": "ISS SSTV (legacy VHF)",
         "center_freq": 145800000,
         "samp_rate": 2400000,
-        "start_freq": 145800000,
-        "start_mod": "nfm",
+        "start_freq": 145798100,
+        "start_mod": "sstv",
         "tuning_step": 1000,
         "rf_gain": 49.6
       },
@@ -208,7 +208,7 @@
         "center_freq": 145825000,
         "samp_rate": 2400000,
         "start_freq": 145825000,
-        "start_mod": "nfm",
+        "start_mod": "packet",
         "tuning_step": 1000,
         "rf_gain": 49.6
       }
