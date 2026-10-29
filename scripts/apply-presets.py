@@ -90,7 +90,11 @@ def profile_names(sdrs: dict) -> list:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--var-dir", required=True, help="Host path mapped to /var/lib/openwebrx")
-    ap.add_argument("--preset", required=True, help="Path to presets/*/sdrs.json")
+    ap.add_argument("--preset", required=True, help="Path to presets/*/sdrs.json (or filtered)")
+    ap.add_argument(
+        "--background",
+        help="Optional background.json (defaults to <preset-dir>/background.json)",
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -134,8 +138,11 @@ def main() -> int:
 
     settings["sdrs"] = new_sdrs
 
-    # Optional background decoding (presets/*/background.json)
-    background_path = preset_path.parent / "background.json"
+    # Optional background decoding
+    if args.background:
+        background_path = Path(args.background)
+    else:
+        background_path = preset_path.parent / "background.json"
     bg_keys = []
     if background_path.is_file():
         background = json.loads(background_path.read_text(encoding="utf-8"))

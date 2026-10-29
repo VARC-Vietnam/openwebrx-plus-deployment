@@ -514,8 +514,25 @@ done
 ok "Selected: ${DEVICE_LABEL} (${OWRX_DEVICE})"
 sleep 0.6
 
+# ---------- profile checkboxes ----------
+step "4/11" "Select profiles"
+PRESET_FULL="${ROOT}/presets/${OWRX_DEVICE}/sdrs.json"
+SELECTED_PRESET="$(mktemp)"
+SELECTED_IDS_FILE="$(mktemp)"
+if [[ ! -f "$PRESET_FULL" ]]; then
+  err "No preset file: ${PRESET_FULL}"
+  exit 1
+fi
+python3 "$ROOT/scripts/select-profiles.py" \
+  --preset "$PRESET_FULL" \
+  --output "$SELECTED_PRESET" \
+  --selected-file "$SELECTED_IDS_FILE"
+# select-profiles clears the screen; restore step header briefly
+ok "Profile selection saved"
+sleep 0.8
+
 # ---------- image / softmbe ----------
-step "4/10" "Docker image"
+step "5/11" "Docker image"
 echo "  1) slechev/openwebrxplus          (standard)"
 echo "  2) slechev/openwebrxplus-softmbe  (includes SoftMBE digital voice)"
 echo
@@ -532,7 +549,7 @@ ok "Image: ${OWRX_IMAGE}"
 sleep 0.6
 
 # ---------- admin / presets ----------
-step "5/10" "Admin, timezone, ports, data"
+step "6/11" "Admin, timezone, ports, data"
 DEFAULT_TZ="$(detect_debian_tz)"
 prompt OWRX_CONTAINER_NAME "Container name" "openwebrxplus"
 prompt OWRX_PORT "Web UI host port" "8073"
@@ -562,7 +579,7 @@ FORWARD_RTL_TCP_EXTERNAL=""
 EXTRA_PORTS=""
 EXTRA_ENV=""
 
-step "6/10" "Device binding / rtl_tcp"
+step "7/11" "Device binding / rtl_tcp"
 info "USB devices are always bound via /dev/bus/usb into the container."
 echo
 
@@ -592,7 +609,7 @@ fi
 sleep 0.6
 
 # ---------- healthcheck ----------
-step "7/10" "Health checks"
+step "8/11" "Health checks"
 HEALTHCHECK_SDR_DEVICES=1
 HEALTHCHECK_USB=""
 case "$OWRX_DEVICE" in
@@ -637,7 +654,7 @@ fi
 echo
 
 # ---------- host prep ----------
-step "8/10" "Host preparation (blacklist + udev)"
+step "9/11" "Host preparation (blacklist + udev)"
 DO_BLACKLIST=false
 DO_UDEV=false
 if [[ -f /etc/modprobe.d/owrx-blacklist.conf ]]; then
@@ -657,7 +674,7 @@ fi
 sleep 0.6
 
 # ---------- summary ----------
-step "9/10" "Summary"
+step "10/11" "Summary"
 cat <<EOF
   Device:        ${DEVICE_LABEL} (${OWRX_DEVICE})
   Image:         ${OWRX_IMAGE}
@@ -699,24 +716,35 @@ fi
 ok "Data directories ready under ${OWRX_DATA_DIR}"
 
 # ---------- seed profiles ----------
-bold "Seeding device profiles (no Airspy / SDRPlay)..."
-PRESET_SRC="${ROOT}/presets/${OWRX_DEVICE}/sdrs.json"
+bold "Seeding selected device profiles (no Airspy / SDRPlay)..."
+PRESET_FULL="${PRESET_FULL:-${ROOT}/presets/${OWRX_DEVICE}/sdrs.json}"
+PRESET_SRC="${SELECTED_PRESET:-$PRESET_FULL}"
 PRESET_DST="${OWRX_DATA_DIR}/presets/sdrs.${OWRX_DEVICE}.json"
+BACKGROUND_JSON="${ROOT}/presets/${OWRX_DEVICE}/background.json"
+mkdir -p "${OWRX_DATA_DIR}/presets"
+if [[ -f "$PRESET_FULL" ]]; then
+  cp "$PRESET_FULL" "$PRESET_DST"
+fi
 if [[ -f "$PRESET_SRC" ]]; then
-  cp "$PRESET_SRC" "$PRESET_DST"
   cp "$PRESET_SRC" "${OWRX_DATA_DIR}/presets/sdrs.json"
-  # Write into live settings.json before/without Airspy+SDRPlay defaults
+  cp "$PRESET_SRC" "${OWRX_DATA_DIR}/presets/sdrs.selected.json"
+  if [[ -n "${SELECTED_IDS_FILE:-}" && -f "$SELECTED_IDS_FILE" ]]; then
+    cp "$SELECTED_IDS_FILE" "${OWRX_DATA_DIR}/presets/SELECTED_PROFILES.txt"
+  fi
   if command -v python3 >/dev/null 2>&1; then
+    BG_ARGS=()
+    [[ -f "$BACKGROUND_JSON" ]] && BG_ARGS=(--background "$BACKGROUND_JSON")
     python3 "$ROOT/scripts/apply-presets.py" \
       --var-dir "${OWRX_DATA_DIR}/var" \
       --preset "$PRESET_SRC" \
-      && ok "Live settings seeded (selected device only)"
+      "${BG_ARGS[@]}" \
+      && ok "Live settings seeded with selected profiles"
   else
-    ok "Preset copied → ${PRESET_DST}"
+    ok "Preset copied → ${OWRX_DATA_DIR}/presets/sdrs.json"
     warn "python3 missing — could not rewrite settings.json yet"
   fi
 else
-  warn "No preset found at ${PRESET_SRC}"
+  warn "No selected preset to seed"
 fi
 
 cat > "${OWRX_DATA_DIR}/presets/SELECTED_DEVICE.txt" <<EOF
@@ -830,7 +858,7 @@ fi
 echo
 
 # ---------- pull & start ----------
-step "10/10" "Pull image & start container"
+step "11/11" "Pull image & start container"
 COMPOSE="${COMPOSE:-docker compose}"
 if confirm "Pull image and start OpenWebRX+ now?" y; then
   run_quiet "Pulling ${OWRX_IMAGE}" "Image pulled" \
@@ -844,10 +872,16 @@ if confirm "Pull image and start OpenWebRX+ now?" y; then
   fi
 
   # Re-apply after first boot so OWRX defaults (Airspy/SDRPlay) cannot stick
-  if [[ -f "$PRESET_SRC" ]] && command -v python3 >/dev/null 2>&1; then
+  if [[ -f "${PRESET_SRC:-}" ]] && command -v python3 >/dev/null 2>&1; then
     sleep 4
-    "$ROOT/scripts/apply-presets.sh"
-    ok "Profiles locked to ${DEVICE_LABEL} (HAMVN + HF + ISS)"
+    BG_ARGS=()
+    [[ -f "${BACKGROUND_JSON:-}" ]] && BG_ARGS=(--background "$BACKGROUND_JSON")
+    python3 "$ROOT/scripts/apply-presets.py" \
+      --var-dir "${OWRX_DATA_DIR}/var" \
+      --preset "$PRESET_SRC" \
+      "${BG_ARGS[@]}" >/dev/null
+    $DOCKER restart "${OWRX_CONTAINER_NAME}" >/dev/null 2>&1 || true
+    ok "Profiles locked to your selection (${DEVICE_LABEL})"
   fi
 
   echo

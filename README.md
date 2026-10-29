@@ -106,11 +106,15 @@ lsusb | grep -iE 'realtek|cypress|0bda|04b4'
 
 ## Applying profiles
 
-`install.sh` and `./scripts/apply-presets.sh` write presets into live `settings.json` and **remove Airspy HF+ / SDRPlay** defaults so only the selected device (RTL-SDR or RX-888) remains.
+`install.sh` and `./scripts/apply-presets.sh` show preset profiles as **checkboxes** so you pick what stays enabled, then write them into live `settings.json` (Airspy HF+ / SDRPlay removed).
 
 ```bash
-./scripts/apply-presets.sh          # or: ./install.sh → option 3
+./scripts/apply-presets.sh          # interactive checkboxes
+./scripts/apply-presets.sh --all    # keep every preset profile
+# or: ./install.sh → option 3
 ```
+
+Controls: type profile numbers to toggle (`1 3 5`), `a` = all, `n` = none, Enter = confirm.
 
 ### Background FT8 (no browser required)
 

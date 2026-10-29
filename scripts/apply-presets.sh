@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # Apply device presets into live OpenWebRX+ settings.json (full sdrs replace).
+# Interactively checkbox-select which profiles to enable unless --all is passed.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib.sh"
+
+SELECT_ALL=false
+if [[ "${1:-}" == "--all" ]]; then
+  SELECT_ALL=true
+fi
 
 if [[ ! -f "$ROOT/.env" ]]; then
   echo "Missing .env — run ./install.sh first."
@@ -16,11 +22,15 @@ source "$ROOT/.env"
 set +a
 
 DEVICE="${OWRX_DEVICE:-rtl_sdr}"
-PRESET="${ROOT}/presets/${DEVICE}/sdrs.json"
+PRESET_FULL="${ROOT}/presets/${DEVICE}/sdrs.json"
+BACKGROUND="${ROOT}/presets/${DEVICE}/background.json"
 VAR_DIR="${OWRX_DATA_DIR}/var"
+FILTERED="$(mktemp)"
+SELECTED_IDS="$(mktemp)"
+trap 'rm -f "$FILTERED" "$SELECTED_IDS"' EXIT
 
-if [[ ! -f "$PRESET" ]]; then
-  echo "Preset not found: ${PRESET}"
+if [[ ! -f "$PRESET_FULL" ]]; then
+  echo "Preset not found: ${PRESET_FULL}"
   exit 1
 fi
 if ! command -v python3 >/dev/null 2>&1; then
@@ -28,10 +38,25 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
+if [[ "$SELECT_ALL" == true ]]; then
+  python3 "$ROOT/scripts/select-profiles.py" \
+    --preset "$PRESET_FULL" \
+    --output "$FILTERED" \
+    --selected-file "$SELECTED_IDS" \
+    --noninteractive
+else
+  python3 "$ROOT/scripts/select-profiles.py" \
+    --preset "$PRESET_FULL" \
+    --output "$FILTERED" \
+    --selected-file "$SELECTED_IDS"
+fi
+
 # Data dir is often root/container-owned after first start
 sudo mkdir -p "${OWRX_DATA_DIR}/presets" "$VAR_DIR"
-sudo cp "$PRESET" "${OWRX_DATA_DIR}/presets/sdrs.${DEVICE}.json"
-sudo cp "$PRESET" "${OWRX_DATA_DIR}/presets/sdrs.json"
+sudo cp "$PRESET_FULL" "${OWRX_DATA_DIR}/presets/sdrs.${DEVICE}.json"
+sudo cp "$FILTERED" "${OWRX_DATA_DIR}/presets/sdrs.json"
+sudo cp "$FILTERED" "${OWRX_DATA_DIR}/presets/sdrs.selected.json"
+sudo cp "$SELECTED_IDS" "${OWRX_DATA_DIR}/presets/SELECTED_PROFILES.txt"
 sudo chown -R "${USER}:${USER}" "${OWRX_DATA_DIR}/presets" 2>/dev/null || true
 
 DOCKER=""
@@ -46,12 +71,21 @@ if DOCKER="$(resolve_docker 2>/dev/null)"; then
   fi
 fi
 
-echo "Applying preset → ${VAR_DIR}/settings.json"
-# apply-presets.py uses sudo tee if the file is not writable
-python3 "$ROOT/scripts/apply-presets.py" --var-dir "$VAR_DIR" --preset "$PRESET"
+echo "Applying selected profiles → ${VAR_DIR}/settings.json"
+BG_ARGS=()
+if [[ -f "$BACKGROUND" ]]; then
+  BG_ARGS=(--background "$BACKGROUND")
+fi
+python3 "$ROOT/scripts/apply-presets.py" \
+  --var-dir "$VAR_DIR" \
+  --preset "$FILTERED" \
+  "${BG_ARGS[@]}"
 
 if [[ -d "${OWRX_DATA_DIR}/etc" ]]; then
-  python3 "$ROOT/scripts/apply-presets.py" --var-dir "${OWRX_DATA_DIR}/etc" --preset "$PRESET" 2>/dev/null || true
+  python3 "$ROOT/scripts/apply-presets.py" \
+    --var-dir "${OWRX_DATA_DIR}/etc" \
+    --preset "$FILTERED" \
+    "${BG_ARGS[@]}" 2>/dev/null || true
 fi
 
 if [[ "$WAS_RUNNING" == true && -n "$DOCKER" ]]; then
@@ -63,4 +97,4 @@ if [[ "$WAS_RUNNING" == true && -n "$DOCKER" ]]; then
   fi
 fi
 
-echo "Done — HAMVN + HF + ISS profiles loaded; Airspy/SDRPlay removed."
+echo "Done — selected profiles applied; Airspy/SDRPlay removed."
