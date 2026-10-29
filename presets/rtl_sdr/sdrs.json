@@ -9,59 +9,170 @@
     "rtltcp_compat": true,
     "port": 1234,
     "profiles": {
-      "2m": {
-        "name": "2m Amateur",
-        "center_freq": 145000000,
+      "hamvn_70cm": {
+        "name": "HAMVN 70cm",
+        "center_freq": 431450000,
         "samp_rate": 2400000,
-        "start_freq": 145500000,
+        "start_freq": 431450000,
         "start_mod": "nfm",
         "tuning_step": 5000,
         "rf_gain": 49.6
       },
-      "70cm": {
-        "name": "70cm Amateur",
-        "center_freq": 435000000,
+      "hamvn_70cm_backup": {
+        "name": "HAMVN 70cm - backup",
+        "center_freq": 431650000,
         "samp_rate": 2400000,
-        "start_freq": 433000000,
+        "start_freq": 431650000,
         "start_mod": "nfm",
         "tuning_step": 5000,
         "rf_gain": 49.6
       },
-      "airband": {
-        "name": "Airband",
-        "center_freq": 127000000,
+      "hamvn_70cm_cw": {
+        "name": "HAMVN 70cm - CW",
+        "center_freq": 431015000,
         "samp_rate": 2400000,
-        "start_freq": 126500000,
-        "start_mod": "am",
-        "tuning_step": 25000,
+        "start_freq": 431015000,
+        "start_mod": "nfm",
+        "tuning_step": 5000,
         "rf_gain": 49.6
       },
-      "broadcast_fm": {
-        "name": "Broadcast FM",
-        "center_freq": 98000000,
+      "hamvn_2m": {
+        "name": "HAMVN 2m",
+        "center_freq": 144450000,
         "samp_rate": 2400000,
-        "start_freq": 98000000,
-        "start_mod": "wfm",
-        "tuning_step": 100000,
+        "start_freq": 144450000,
+        "start_mod": "nfm",
+        "tuning_step": 5000,
         "rf_gain": 49.6
       },
-      "adsb": {
-        "name": "1090 ADS-B",
-        "center_freq": 1090000000,
+      "hamvn_2m_backup": {
+        "name": "HAMVN 2m - backup",
+        "center_freq": 144650000,
         "samp_rate": 2400000,
-        "start_freq": 1090000000,
+        "start_freq": 144650000,
+        "start_mod": "nfm",
+        "tuning_step": 5000,
+        "rf_gain": 49.6
+      },
+      "hamvn_2m_cw": {
+        "name": "HAMVN 2m - CW",
+        "center_freq": 144015000,
+        "samp_rate": 2400000,
+        "start_freq": 144015000,
+        "start_mod": "nfm",
+        "tuning_step": 5000,
+        "rf_gain": 49.6
+      },
+      "40m_ft8": {
+        "name": "40m FT8",
+        "center_freq": 7074000,
+        "samp_rate": 2400000,
+        "start_freq": 7074000,
+        "start_mod": "usb",
+        "tuning_step": 10,
+        "direct_sampling": 2,
+        "rf_gain": 49.6
+      },
+      "40m_ft4": {
+        "name": "40m FT4",
+        "center_freq": 7047500,
+        "samp_rate": 2400000,
+        "start_freq": 7047500,
+        "start_mod": "usb",
+        "tuning_step": 10,
+        "direct_sampling": 2,
+        "rf_gain": 49.6
+      },
+      "20m_ft8": {
+        "name": "20m FT8",
+        "center_freq": 14074000,
+        "samp_rate": 2400000,
+        "start_freq": 14074000,
+        "start_mod": "usb",
+        "tuning_step": 10,
+        "direct_sampling": 2,
+        "rf_gain": 49.6
+      },
+      "20m_ft4": {
+        "name": "20m FT4",
+        "center_freq": 14080000,
+        "samp_rate": 2400000,
+        "start_freq": 14080000,
+        "start_mod": "usb",
+        "tuning_step": 10,
+        "direct_sampling": 2,
+        "rf_gain": 49.6
+      },
+      "10m_ft8": {
+        "name": "10m FT8",
+        "center_freq": 28074000,
+        "samp_rate": 2400000,
+        "start_freq": 28074000,
+        "start_mod": "usb",
+        "tuning_step": 10,
+        "rf_gain": 49.6
+      },
+      "10m_ft4": {
+        "name": "10m FT4",
+        "center_freq": 28180000,
+        "samp_rate": 2400000,
+        "start_freq": 28180000,
+        "start_mod": "usb",
+        "tuning_step": 10,
+        "rf_gain": 49.6
+      },
+      "iss_voice_dl": {
+        "name": "ISS Voice downlink",
+        "center_freq": 145800000,
+        "samp_rate": 2400000,
+        "start_freq": 145800000,
         "start_mod": "nfm",
         "tuning_step": 1000,
         "rf_gain": 49.6
       },
-      "40m_ds": {
-        "name": "40m HF (direct sampling)",
-        "center_freq": 7100000,
+      "iss_fm_rpt_ul": {
+        "name": "ISS FM repeater uplink",
+        "center_freq": 145990000,
         "samp_rate": 2400000,
-        "start_freq": 7074000,
-        "start_mod": "lsb",
-        "tuning_step": 100,
-        "direct_sampling": 2,
+        "start_freq": 145990000,
+        "start_mod": "nfm",
+        "tuning_step": 1000,
+        "rf_gain": 49.6
+      },
+      "iss_fm_rpt_dl": {
+        "name": "ISS FM repeater downlink",
+        "center_freq": 437800000,
+        "samp_rate": 2400000,
+        "start_freq": 437800000,
+        "start_mod": "nfm",
+        "tuning_step": 1000,
+        "rf_gain": 49.6
+      },
+      "iss_sstv_uhf": {
+        "name": "ISS SSTV",
+        "center_freq": 437550000,
+        "samp_rate": 2400000,
+        "start_freq": 437550000,
+        "start_mod": "nfm",
+        "tuning_step": 1000,
+        "rf_gain": 49.6
+      },
+      "iss_sstv_vhf": {
+        "name": "ISS SSTV (legacy VHF)",
+        "center_freq": 145800000,
+        "samp_rate": 2400000,
+        "start_freq": 145800000,
+        "start_mod": "nfm",
+        "tuning_step": 1000,
+        "rf_gain": 49.6
+      },
+      "iss_aprs": {
+        "name": "ISS APRS packet",
+        "center_freq": 145825000,
+        "samp_rate": 2400000,
+        "start_freq": 145825000,
+        "start_mod": "nfm",
+        "tuning_step": 1000,
         "rf_gain": 49.6
       }
     }
