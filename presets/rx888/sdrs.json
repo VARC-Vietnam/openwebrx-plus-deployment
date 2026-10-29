@@ -1,0 +1,50 @@
+{
+  "rx888": {
+    "name": "RX-888",
+    "type": "sddc_soapy",
+    "enabled": true,
+    "ppm": 0,
+    "profiles": {
+      "20m": {
+        "name": "20m Amateur",
+        "center_freq": 14150000,
+        "samp_rate": 2000000,
+        "start_freq": 14074000,
+        "start_mod": "usb",
+        "tuning_step": 100
+      },
+      "40m": {
+        "name": "40m Amateur",
+        "center_freq": 7100000,
+        "samp_rate": 2000000,
+        "start_freq": 7074000,
+        "start_mod": "lsb",
+        "tuning_step": 100
+      },
+      "80m": {
+        "name": "80m Amateur",
+        "center_freq": 3750000,
+        "samp_rate": 2000000,
+        "start_freq": 3573000,
+        "start_mod": "lsb",
+        "tuning_step": 100
+      },
+      "broadcast_sw": {
+        "name": "Shortwave Broadcast",
+        "center_freq": 10000000,
+        "samp_rate": 2000000,
+        "start_freq": 10000000,
+        "start_mod": "am",
+        "tuning_step": 1000
+      },
+      "mw": {
+        "name": "Medium Wave",
+        "center_freq": 1000000,
+        "samp_rate": 2000000,
+        "start_freq": 1000000,
+        "start_mod": "am",
+        "tuning_step": 1000
+      }
+    }
+  }
+}

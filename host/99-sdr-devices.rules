@@ -1,0 +1,14 @@
+# Allow non-root / container access to common SDR USB devices.
+# Installed to /etc/udev/rules.d/99-sdr-devices.rules by install.sh
+
+# RTL-SDR (Realtek)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2832", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2839", MODE="0666", GROUP="plugdev"
+
+# RX-888 / BBRF103 / SDDC family (Cypress FX3)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04b4", ATTRS{idProduct}=="00f1", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04b4", ATTRS{idProduct}=="00f3", MODE="0666", GROUP="plugdev"
+
+# HackRF
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="6089", MODE="0666", GROUP="plugdev"

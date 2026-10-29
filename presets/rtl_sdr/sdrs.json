@@ -1,0 +1,69 @@
+{
+  "rtlsdr": {
+    "name": "RTL-SDR",
+    "type": "rtl_sdr",
+    "enabled": true,
+    "ppm": 0,
+    "rf_gain": 49.6,
+    "direct_sampling": 0,
+    "rtltcp_compat": true,
+    "port": 1234,
+    "profiles": {
+      "2m": {
+        "name": "2m Amateur",
+        "center_freq": 145000000,
+        "samp_rate": 2400000,
+        "start_freq": 145500000,
+        "start_mod": "nfm",
+        "tuning_step": 5000,
+        "rf_gain": 49.6
+      },
+      "70cm": {
+        "name": "70cm Amateur",
+        "center_freq": 435000000,
+        "samp_rate": 2400000,
+        "start_freq": 433000000,
+        "start_mod": "nfm",
+        "tuning_step": 5000,
+        "rf_gain": 49.6
+      },
+      "airband": {
+        "name": "Airband",
+        "center_freq": 127000000,
+        "samp_rate": 2400000,
+        "start_freq": 126500000,
+        "start_mod": "am",
+        "tuning_step": 25000,
+        "rf_gain": 49.6
+      },
+      "broadcast_fm": {
+        "name": "Broadcast FM",
+        "center_freq": 98000000,
+        "samp_rate": 2400000,
+        "start_freq": 98000000,
+        "start_mod": "wfm",
+        "tuning_step": 100000,
+        "rf_gain": 49.6
+      },
+      "adsb": {
+        "name": "1090 ADS-B",
+        "center_freq": 1090000000,
+        "samp_rate": 2400000,
+        "start_freq": 1090000000,
+        "start_mod": "nfm",
+        "tuning_step": 1000,
+        "rf_gain": 49.6
+      },
+      "40m_ds": {
+        "name": "40m HF (direct sampling)",
+        "center_freq": 7100000,
+        "samp_rate": 2400000,
+        "start_freq": 7074000,
+        "start_mod": "lsb",
+        "tuning_step": 100,
+        "direct_sampling": 2,
+        "rf_gain": 49.6
+      }
+    }
+  }
+}
