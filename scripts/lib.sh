@@ -36,6 +36,52 @@ resolve_docker() {
   fi
 }
 
+# Seed custom.css + plugins/*/init.js so /static/... is real CSS/JS (not HTML 404 → MIME block).
+# Safe to call repeatedly; never overwrites existing non-empty user files.
+ensure_static_stubs() {
+  local root="${1:-}"
+  local data_dir="${2:-}"
+  if [[ -z "$root" ]]; then
+    root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  fi
+  if [[ -z "$data_dir" ]]; then
+    if [[ -f "${root}/.env" ]]; then
+      # shellcheck disable=SC1091
+      set -a; source "${root}/.env"; set +a
+    fi
+    data_dir="${OWRX_DATA_DIR:-/opt/owrx-docker}"
+  fi
+
+  local tpl="${root}/templates"
+  mkdir -p "${data_dir}/etc" \
+    "${data_dir}/plugins/receiver" \
+    "${data_dir}/plugins/map" 2>/dev/null \
+    || sudo mkdir -p "${data_dir}/etc" \
+      "${data_dir}/plugins/receiver" \
+      "${data_dir}/plugins/map"
+
+  _seed_stub() {
+    local dest="$1" src="$2"
+    if [[ -f "$dest" ]] && [[ -s "$dest" ]]; then
+      return 0
+    fi
+    if [[ ! -f "$src" ]]; then
+      return 0
+    fi
+    if cp "$src" "$dest" 2>/dev/null; then
+      :
+    else
+      sudo cp "$src" "$dest"
+      sudo chown "${USER}:${USER}" "$dest" 2>/dev/null || true
+    fi
+    echo "seeded: ${dest}"
+  }
+
+  _seed_stub "${data_dir}/etc/custom.css" "${tpl}/custom.css"
+  _seed_stub "${data_dir}/plugins/receiver/init.js" "${tpl}/plugins/receiver/init.js"
+  _seed_stub "${data_dir}/plugins/map/init.js" "${tpl}/plugins/map/init.js"
+}
+
 # Ensure docker-compose.yml mounts patches/sondehub.py (SondeHub isValidValue hotfix).
 # Safe to call repeatedly; no-op if already present or files missing.
 ensure_sondehub_hotfix() {

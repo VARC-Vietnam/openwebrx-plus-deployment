@@ -167,6 +167,8 @@ Remove that volume once Docker Hub ships a build newer than the 2026-10-28 upstr
 
 Generated (gitignored): `.env`, `docker-compose.yml`, and data under `/opt/owrx-docker` (or your chosen path).
 
+`./scripts/start.sh` seeds `etc/custom.css` and `plugins/{receiver,map}/init.js` if missing. Without those, the browser requests return HTML 404 pages and Firefox blocks them as MIME mismatches.
+
 ## References
 
 - [Docker Hub — slechev/openwebrxplus](https://hub.docker.com/r/slechev/openwebrxplus)

@@ -1101,6 +1101,7 @@ else
     "${OWRX_DATA_DIR}/presets"
 fi
 ok "Data directories ready under ${OWRX_DATA_DIR}"
+ensure_static_stubs "$ROOT" "${OWRX_DATA_DIR}"
 
 # ---------- seed profiles ----------
 bold "Seeding selected device profiles (no Airspy / SDRPlay)..."
