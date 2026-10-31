@@ -604,6 +604,16 @@ run_profiles_only() {
     --selected-file "$selected_ids" \
     "${initial_args[@]}"
 
+  if [[ "${RTL_TCP_CLIENT:-false}" == true && -n "${RTL_TCP_REMOTE:-}" ]]; then
+    patched="$(mktemp)"
+    python3 "$ROOT/scripts/patch-rtl-tcp-preset.py" \
+      --input "$filtered" \
+      --output "$patched" \
+      --remote "$RTL_TCP_REMOTE"
+    mv "$patched" "$filtered"
+    ok "Profiles use rtl_tcp → ${RTL_TCP_REMOTE}"
+  fi
+
   step "2/3" "Select background decoders"
   run_select_background_services "${OWRX_DATA_DIR}"
   background="${SELECTED_BACKGROUND_JSON}"
@@ -857,7 +867,7 @@ read -r -p "Press Enter to continue..." _ || true
 
 # ---------- device selection ----------
 step "3/10" "Select supported device"
-echo "  1) RTL-SDR          (rtl_sdr — bind /dev/bus/usb, optional rtl_tcp)"
+echo "  1) RTL-SDR          (USB or network rtl_tcp — choose next)"
 echo "  2) RX-888 / SDDC    (sddc_soapy — bind /dev/bus/usb)"
 echo
 DEVICE_DEFAULT="1"
@@ -957,39 +967,80 @@ if [[ "${OWRX_DATA_DIR}" != /* ]]; then
 fi
 echo
 
-# ---------- rtl_tcp ----------
+# ---------- SDR access: USB vs rtl_tcp client ----------
 ENABLE_RTL_TCP=false
+RTL_TCP_CLIENT=false
+RTL_TCP_REMOTE=""
+BIND_USB=true
 FORWARD_LOCALPORT_INTERNAL=""
 FORWARD_RTL_TCP_EXTERNAL=""
 EXTRA_PORTS=""
 EXTRA_ENV=""
+EXTRA_HOSTS=""
 
 step "8/12" "Device binding / rtl_tcp"
-info "USB devices are always bound via /dev/bus/usb into the container."
 echo
 
 if [[ "$OWRX_DEVICE" == "rtl_sdr" ]]; then
-  info "RTL-SDR options:"
-  echo "  • Direct USB (recommended) — OpenWebRX talks to the dongle inside Docker"
-  echo "  • Also expose rtl_tcp-compatible port (FORWARD_LOCALPORT) for external clients"
+  info "How should OpenWebRX reach the RTL-SDR?"
+  echo "  1) USB on this Docker host     — mount /dev/bus/usb (type rtl_sdr)"
+  echo "  2) Network rtl_tcp server      — connect to host:port (type rtl_tcp, no USB mount)"
   echo
-  if confirm "Enable rtl_tcp port forwarding from the container?" n; then
-    ENABLE_RTL_TCP=true
-    prompt FORWARD_LOCALPORT_INTERNAL "Internal rtl_tcp port (OWRX settings / rtltcp_compat)" "1234"
-    prompt FORWARD_RTL_TCP_EXTERNAL "External host port to publish" "5678"
-    if [[ "$FORWARD_LOCALPORT_INTERNAL" == "$FORWARD_RTL_TCP_EXTERNAL" ]]; then
-      err "Internal and external rtl_tcp ports must differ (Docker Hub requirement)."
-      exit 1
-    fi
-    EXTRA_PORTS="      - \"${FORWARD_RTL_TCP_EXTERNAL}:${FORWARD_RTL_TCP_EXTERNAL}\""
-    EXTRA_ENV="      FORWARD_LOCALPORT_${FORWARD_LOCALPORT_INTERNAL}: ${FORWARD_RTL_TCP_EXTERNAL}"
-    ok "rtl_tcp: container ${FORWARD_LOCALPORT_INTERNAL} → host ${FORWARD_RTL_TCP_EXTERNAL}"
+  echo "  Mode 2 is for rtl_tcp on this machine or another LAN host you can reach"
+  echo "  (e.g. rtl_tcp -a 0.0.0.0 -p 1234). OpenWebRX will use device type rtl_tcp."
+  echo
+  RTL_ACCESS_DEFAULT="1"
+  [[ "${RTL_TCP_CLIENT:-}" == "true" ]] && RTL_ACCESS_DEFAULT="2"
+  RTL_ACCESS=""
+  while [[ -z "$RTL_ACCESS" ]]; do
+    prompt RTL_ACCESS "Choose access mode [1-2]" "$RTL_ACCESS_DEFAULT"
+    case "$RTL_ACCESS" in
+      1|2) ;;
+      *) RTL_ACCESS=""; warn "Invalid choice." ;;
+    esac
+  done
+
+  if [[ "$RTL_ACCESS" == "2" ]]; then
+    RTL_TCP_CLIENT=true
+    BIND_USB=false
+    ENABLE_RTL_TCP=false
+    info "rtl_tcp endpoint (from inside the OpenWebRX container):"
+    echo "  • Same Docker host: use host.docker.internal (added via extra_hosts)"
+    echo "  • Other LAN machine: use that host's IP, e.g. 192.168.1.50"
+    echo
+    prompt RTL_TCP_REMOTE_HOST "rtl_tcp host" "${RTL_TCP_REMOTE_HOST:-host.docker.internal}"
+    prompt RTL_TCP_REMOTE_PORT "rtl_tcp port" "${RTL_TCP_REMOTE_PORT:-1234}"
+    RTL_TCP_REMOTE="${RTL_TCP_REMOTE_HOST}:${RTL_TCP_REMOTE_PORT}"
+    EXTRA_HOSTS="    extra_hosts:
+      - \"host.docker.internal:host-gateway\""
+    ok "OpenWebRX device type rtl_tcp → ${RTL_TCP_REMOTE} (USB mount disabled)"
   else
-    ok "rtl_tcp forwarding disabled (USB-only)."
+    BIND_USB=true
+    RTL_TCP_CLIENT=false
+    RTL_TCP_REMOTE=""
+    info "USB mode: /dev/bus/usb will be bound into the container."
+    echo "  Optional: also publish an rtl_tcp-compatible IQ tap (FORWARD_LOCALPORT)"
+    echo "  for external clients — this is not the same as connecting *to* rtl_tcp."
+    echo
+    if confirm "Also expose rtl_tcp-compatible port from the container?" n; then
+      ENABLE_RTL_TCP=true
+      prompt FORWARD_LOCALPORT_INTERNAL "Internal rtl_tcp port (OWRX rtltcp_compat)" "1234"
+      prompt FORWARD_RTL_TCP_EXTERNAL "External host port to publish" "5678"
+      if [[ "$FORWARD_LOCALPORT_INTERNAL" == "$FORWARD_RTL_TCP_EXTERNAL" ]]; then
+        err "Internal and external rtl_tcp ports must differ (Docker Hub requirement)."
+        exit 1
+      fi
+      EXTRA_PORTS="      - \"${FORWARD_RTL_TCP_EXTERNAL}:${FORWARD_RTL_TCP_EXTERNAL}\""
+      EXTRA_ENV="      FORWARD_LOCALPORT_${FORWARD_LOCALPORT_INTERNAL}: ${FORWARD_RTL_TCP_EXTERNAL}"
+      ok "IQ tap: container ${FORWARD_LOCALPORT_INTERNAL} → host ${FORWARD_RTL_TCP_EXTERNAL}"
+    else
+      ok "USB-only (no rtl_tcp publish)."
+    fi
   fi
 else
+  BIND_USB=true
   warn "RX-888 uses SoapySDDC inside the image (CPU-heavy; not ideal on Pi-class hosts)."
-  ok "USB bus will be passed through; no rtl_tcp forwarding for RX-888."
+  ok "USB bus will be passed through; no rtl_tcp client mode for RX-888."
 fi
 sleep 0.6
 
@@ -997,39 +1048,43 @@ sleep 0.6
 step "9/12" "Health checks"
 HEALTHCHECK_SDR_DEVICES=1
 HEALTHCHECK_USB=""
-case "$OWRX_DEVICE" in
-  rtl_sdr)
-    # Prefer Blog stick ID; also works for generic 2832
-    if command -v lsusb >/dev/null 2>&1; then
-      if lsusb -d 0bda:2838 >/dev/null 2>&1; then
-        HEALTHCHECK_USB="HEALTHCHECK_USB_0BDA_2838=1"
-      elif lsusb -d 0bda:2832 >/dev/null 2>&1; then
-        HEALTHCHECK_USB="HEALTHCHECK_USB_0BDA_2832=1"
+if [[ "$BIND_USB" == true ]]; then
+  case "$OWRX_DEVICE" in
+    rtl_sdr)
+      if command -v lsusb >/dev/null 2>&1; then
+        if lsusb -d 0bda:2838 >/dev/null 2>&1; then
+          HEALTHCHECK_USB="HEALTHCHECK_USB_0BDA_2838=1"
+        elif lsusb -d 0bda:2832 >/dev/null 2>&1; then
+          HEALTHCHECK_USB="HEALTHCHECK_USB_0BDA_2832=1"
+        else
+          HEALTHCHECK_USB="HEALTHCHECK_USB_0BDA_2838=1"
+        fi
       else
         HEALTHCHECK_USB="HEALTHCHECK_USB_0BDA_2838=1"
       fi
-    else
-      HEALTHCHECK_USB="HEALTHCHECK_USB_0BDA_2838=1"
-    fi
-    ;;
-  rx888)
-    if command -v lsusb >/dev/null 2>&1 && lsusb -d 04b4:00f3 >/dev/null 2>&1; then
-      HEALTHCHECK_USB="HEALTHCHECK_USB_04B4_00F3=1"
-    else
-      HEALTHCHECK_USB="HEALTHCHECK_USB_04B4_00F1=1"
-    fi
-    ;;
-esac
+      ;;
+    rx888)
+      if command -v lsusb >/dev/null 2>&1 && lsusb -d 04b4:00f3 >/dev/null 2>&1; then
+        HEALTHCHECK_USB="HEALTHCHECK_USB_04B4_00F3=1"
+      else
+        HEALTHCHECK_USB="HEALTHCHECK_USB_04B4_00F1=1"
+      fi
+      ;;
+  esac
 
-if confirm "Enable USB + SDR health checks?" y; then
-  # Convert KEY=VALUE → YAML "KEY: VALUE" for compose
-  HC_YAML="${HEALTHCHECK_USB/=/: }"
-  EXTRA_ENV="${EXTRA_ENV}"$'\n'"      ${HC_YAML}"$'\n'"      HEALTHCHECK_SDR_DEVICES: ${HEALTHCHECK_SDR_DEVICES}"
-  ok "Health checks enabled (${HEALTHCHECK_USB})."
+  if confirm "Enable USB + SDR health checks?" y; then
+    HC_YAML="${HEALTHCHECK_USB/=/: }"
+    EXTRA_ENV="${EXTRA_ENV}"$'\n'"      ${HC_YAML}"$'\n'"      HEALTHCHECK_SDR_DEVICES: ${HEALTHCHECK_SDR_DEVICES}"
+    ok "Health checks enabled (${HEALTHCHECK_USB})."
+  else
+    HEALTHCHECK_USB=""
+    HEALTHCHECK_SDR_DEVICES=""
+    warn "Health checks skipped."
+  fi
 else
   HEALTHCHECK_USB=""
   HEALTHCHECK_SDR_DEVICES=""
-  warn "Health checks skipped."
+  ok "USB health checks skipped (rtl_tcp client — no USB in container)."
 fi
 
 ENABLE_AUTOHEAL=false
@@ -1042,33 +1097,49 @@ echo
 step "10/12" "Host preparation (blacklist + udev)"
 DO_BLACKLIST=false
 DO_UDEV=false
-if [[ -f /etc/modprobe.d/owrx-blacklist.conf ]]; then
+if [[ "$BIND_USB" != true ]]; then
+  ok "Skipping blacklist/udev prompts (rtl_tcp client — stick is not on this Docker host)."
+elif [[ -f /etc/modprobe.d/owrx-blacklist.conf ]]; then
   ok "Blacklist already installed — keeping"
+  if [[ -f /etc/udev/rules.d/99-sdr-devices.rules ]]; then
+    ok "Udev rules already installed — keeping"
+  else
+    if confirm "Install udev rules for SDR USB permissions? (recommended)" y; then
+      DO_UDEV=true
+    fi
+  fi
 else
   if confirm "Install kernel module blacklist for SDR drivers? (recommended)" y; then
     DO_BLACKLIST=true
   fi
-fi
-if [[ -f /etc/udev/rules.d/99-sdr-devices.rules ]]; then
-  ok "Udev rules already installed — keeping"
-else
-  if confirm "Install udev rules for SDR USB permissions? (recommended)" y; then
-    DO_UDEV=true
+  if [[ -f /etc/udev/rules.d/99-sdr-devices.rules ]]; then
+    ok "Udev rules already installed — keeping"
+  else
+    if confirm "Install udev rules for SDR USB permissions? (recommended)" y; then
+      DO_UDEV=true
+    fi
   fi
 fi
 sleep 0.6
 
 # ---------- summary ----------
 step "11/12" "Summary"
+RTL_SUMMARY="off"
+if [[ "$RTL_TCP_CLIENT" == true ]]; then
+  RTL_SUMMARY="client → ${RTL_TCP_REMOTE} (no USB mount)"
+elif [[ "$ENABLE_RTL_TCP" == true ]]; then
+  RTL_SUMMARY="publish ${FORWARD_LOCALPORT_INTERNAL}→${FORWARD_RTL_TCP_EXTERNAL}"
+fi
 cat <<EOF
   Device:        ${DEVICE_LABEL} (${OWRX_DEVICE})
+  Access:        $([ "$BIND_USB" = true ] && echo "USB mount" || echo "rtl_tcp client")
   Image:         ${OWRX_IMAGE}
   Container:     ${OWRX_CONTAINER_NAME}
   Web port:      ${OWRX_PORT}
   Timezone:      ${TZ}
   Admin:         ${OPENWEBRX_ADMIN_USER}
   Data dir:      ${OWRX_DATA_DIR}
-  rtl_tcp:       ${ENABLE_RTL_TCP}$([ "$ENABLE_RTL_TCP" = true ] && echo " (${FORWARD_LOCALPORT_INTERNAL}→${FORWARD_RTL_TCP_EXTERNAL})" || true)
+  rtl_tcp:       ${RTL_SUMMARY}
   Blacklist:     ${DO_BLACKLIST}
   Udev rules:    ${DO_UDEV}
   Autoheal:      ${ENABLE_AUTOHEAL}
@@ -1110,6 +1181,22 @@ PRESET_SRC="${SELECTED_PRESET:-$PRESET_FULL}"
 PRESET_DST="${OWRX_DATA_DIR}/presets/sdrs.${OWRX_DEVICE}.json"
 BACKGROUND_JSON="${SELECTED_BACKGROUND_JSON:-${ROOT}/presets/${OWRX_DEVICE}/background.json}"
 mkdir -p "${OWRX_DATA_DIR}/presets" "${OWRX_DATA_DIR}/etc"
+
+# If rtl_tcp client mode: rewrite selected preset to type=rtl_tcp + remote=host:port
+if [[ "$RTL_TCP_CLIENT" == true && -n "$RTL_TCP_REMOTE" && -f "$PRESET_SRC" ]]; then
+  PATCHED="$(mktemp)"
+  if python3 "$ROOT/scripts/patch-rtl-tcp-preset.py" \
+      --input "$PRESET_SRC" \
+      --output "$PATCHED" \
+      --remote "$RTL_TCP_REMOTE"; then
+    PRESET_SRC="$PATCHED"
+    ok "Preset converted to rtl_tcp → ${RTL_TCP_REMOTE}"
+  else
+    err "Failed to convert preset to rtl_tcp"
+    exit 1
+  fi
+fi
+
 if [[ -f "$PRESET_FULL" ]]; then
   cp "$PRESET_FULL" "$PRESET_DST"
 fi
@@ -1146,6 +1233,9 @@ cat > "${OWRX_DATA_DIR}/presets/SELECTED_DEVICE.txt" <<EOF
 device=${OWRX_DEVICE}
 label=${DEVICE_LABEL}
 image=${OWRX_IMAGE}
+bind_usb=${BIND_USB}
+rtl_tcp_client=${RTL_TCP_CLIENT}
+rtl_tcp_remote=${RTL_TCP_REMOTE}
 generated=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 
@@ -1160,6 +1250,9 @@ OPENWEBRX_ADMIN_USER=${OPENWEBRX_ADMIN_USER}
 OPENWEBRX_ADMIN_PASSWORD=${OPENWEBRX_ADMIN_PASSWORD}
 OWRX_DATA_DIR=${OWRX_DATA_DIR}
 OWRX_DEVICE=${OWRX_DEVICE}
+BIND_USB=${BIND_USB}
+RTL_TCP_CLIENT=${RTL_TCP_CLIENT}
+RTL_TCP_REMOTE=${RTL_TCP_REMOTE}
 ENABLE_RTL_TCP=${ENABLE_RTL_TCP}
 FORWARD_LOCALPORT_INTERNAL=${FORWARD_LOCALPORT_INTERNAL}
 FORWARD_RTL_TCP_EXTERNAL=${FORWARD_RTL_TCP_EXTERNAL}
@@ -1191,6 +1284,21 @@ fi
 PORTS_LINES=""
 if [[ -n "${EXTRA_PORTS}" ]]; then
   PORTS_LINES="${EXTRA_PORTS}"$'\n'
+fi
+
+USB_BLOCK=""
+if [[ "$BIND_USB" == true ]]; then
+  USB_BLOCK="    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    privileged: true"
+else
+  USB_BLOCK="    # USB not mounted — OpenWebRX uses rtl_tcp at \${RTL_TCP_REMOTE}
+    privileged: false"
+fi
+
+HOSTS_BLOCK=""
+if [[ -n "${EXTRA_HOSTS}" ]]; then
+  HOSTS_BLOCK="${EXTRA_HOSTS}"$'\n'
 fi
 
 MQTT_SERVICE=""
@@ -1232,8 +1340,7 @@ ${PORTS_LINES}${MQTT_DEPENDS}    environment:
       TZ: \${TZ}
       OPENWEBRX_ADMIN_USER: \${OPENWEBRX_ADMIN_USER}
       OPENWEBRX_ADMIN_PASSWORD: \${OPENWEBRX_ADMIN_PASSWORD}
-${ENV_LINES}    devices:
-      - /dev/bus/usb:/dev/bus/usb
+${ENV_LINES}${HOSTS_BLOCK}${USB_BLOCK}
     volumes:
       - \${OWRX_DATA_DIR}/etc:/etc/openwebrx
       - \${OWRX_DATA_DIR}/var:/var/lib/openwebrx
@@ -1242,7 +1349,6 @@ ${ENV_LINES}    devices:
       - ./patches/sondehub.py:/usr/lib/python3/dist-packages/owrx/reporting/sondehub.py:ro
     tmpfs:
       - /tmp:mode=1777
-    privileged: true
 ${MQTT_SERVICE}
   autoheal:
     image: willfarrell/autoheal:latest
@@ -1315,8 +1421,11 @@ if confirm "Pull image and start OpenWebRX+ now?" y; then
   echo
   bold "Next"
   echo "  Profiles: HAMVN / HF FT8-FT4 / ISS only (no Airspy+, no SDRPlay)"
-  if [[ "$OWRX_DEVICE" == "rtl_sdr" && "$ENABLE_RTL_TCP" == true ]]; then
-    echo "  rtl_tcp host port: ${FORWARD_RTL_TCP_EXTERNAL} (internal ${FORWARD_LOCALPORT_INTERNAL})"
+  if [[ "$RTL_TCP_CLIENT" == true ]]; then
+    echo "  OpenWebRX connects to rtl_tcp at ${RTL_TCP_REMOTE}"
+    echo "  Ensure the server is listening, e.g.: rtl_tcp -a 0.0.0.0 -p ${RTL_TCP_REMOTE##*:}"
+  elif [[ "$OWRX_DEVICE" == "rtl_sdr" && "$ENABLE_RTL_TCP" == true ]]; then
+    echo "  rtl_tcp publish: host ${FORWARD_RTL_TCP_EXTERNAL} (internal ${FORWARD_LOCALPORT_INTERNAL})"
   fi
   if [[ "$DO_BLACKLIST" == true ]]; then
     echo "  Reboot if the SDR is still not claimed."

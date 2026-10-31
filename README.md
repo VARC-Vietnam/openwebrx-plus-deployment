@@ -48,8 +48,10 @@ Sign in with the admin user/password you set in the installer.
 3. Adds your user to `docker` + `plugdev` (skips if already a member)
 4. Scans USB for RTL-SDR / RX-888
 5. Prompts: device, image (standard/SoftMBE), admin, TZ, port, data dir
-6. RTL-SDR: optional **rtl_tcp** port publish (`FORWARD_LOCALPORT_…`)
-7. Installs blacklist + udev only if not already present
+6. RTL-SDR access mode:
+   - **USB** — mount `/dev/bus/usb`, device type `rtl_sdr` (optional IQ tap publish)
+   - **rtl_tcp** — no USB mount; device type `rtl_tcp` → `host:port` (LAN or `host.docker.internal`)
+7. Installs blacklist + udev only for USB mode (skipped for rtl_tcp client)
 8. Writes `.env` + `docker-compose.yml`, seeds profiles, starts Compose
 
 ## Helper scripts
@@ -77,10 +79,17 @@ Stops containers, removes OpenWebRX+/autoheal images, deletes generated `.env` /
 
 ### RTL-SDR
 
-- Type: `rtl_sdr`
-- USB: `0bda:2832`, `0bda:2838`, …
-- Host DVB drivers blacklisted so Docker can claim the stick
-- Optional rtl_tcp: e.g. container `1234` → host `5678`
+Two access modes (chosen at install):
+
+| Mode | OpenWebRX type | Docker | When to use |
+|------|----------------|--------|-------------|
+| USB | `rtl_sdr` | mounts `/dev/bus/usb` | Dongle plugged into this host |
+| rtl_tcp client | `rtl_tcp` | no USB; `remote: host:port` | `rtl_tcp` on this host or another LAN machine |
+
+- USB IDs: `0bda:2832`, `0bda:2838`, …
+- USB mode: host DVB drivers blacklisted so Docker can claim the stick
+- USB mode optional IQ tap: publish `FORWARD_LOCALPORT_…` for external clients
+- rtl_tcp client: start server elsewhere, e.g. `rtl_tcp -a 0.0.0.0 -p 1234`; from the container use `host.docker.internal:1234` (same host) or `192.168.x.x:1234` (LAN)
 - Profiles: `presets/rtl_sdr/sdrs.json` — HAMVN 2m/70cm, HF 10/20/40 (LSB/USB + FT8/FT4), ISS voice/SSTV/FM/APRS
 
 ### RX-888

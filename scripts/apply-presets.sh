@@ -62,6 +62,16 @@ else
     "${INITIAL_ARGS[@]}"
 fi
 
+if [[ "${RTL_TCP_CLIENT:-false}" == true && -n "${RTL_TCP_REMOTE:-}" ]]; then
+  PATCHED="$(mktemp)"
+  python3 "$ROOT/scripts/patch-rtl-tcp-preset.py" \
+    --input "$FILTERED" \
+    --output "$PATCHED" \
+    --remote "$RTL_TCP_REMOTE"
+  mv "$PATCHED" "$FILTERED"
+  echo "Using rtl_tcp client → ${RTL_TCP_REMOTE}"
+fi
+
 # Data dir is often root/container-owned after first start
 sudo mkdir -p "${OWRX_DATA_DIR}/presets" "$VAR_DIR"
 sudo cp "$PRESET_FULL" "${OWRX_DATA_DIR}/presets/sdrs.${DEVICE}.json"

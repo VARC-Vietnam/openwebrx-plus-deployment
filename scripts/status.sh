@@ -24,7 +24,14 @@ echo "  Image:    ${OWRX_IMAGE}"
 echo "  Device:   ${OWRX_DEVICE}"
 echo "  Port:     ${OWRX_PORT}"
 echo "  Data:     ${OWRX_DATA_DIR}"
-echo "  rtl_tcp:  ${ENABLE_RTL_TCP:-false}"
+echo "  USB bind: ${BIND_USB:-true}"
+if [[ "${RTL_TCP_CLIENT:-false}" == true ]]; then
+  echo "  rtl_tcp:  client → ${RTL_TCP_REMOTE:-?}"
+elif [[ "${ENABLE_RTL_TCP:-false}" == true ]]; then
+  echo "  rtl_tcp:  publish ${FORWARD_LOCALPORT_INTERNAL:-?}→${FORWARD_RTL_TCP_EXTERNAL:-?}"
+else
+  echo "  rtl_tcp:  off"
+fi
 echo
 echo "=== USB (host) ==="
 "$ROOT/scripts/detect-usb.sh" || true

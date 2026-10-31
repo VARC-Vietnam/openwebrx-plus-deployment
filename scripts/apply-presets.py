@@ -108,6 +108,8 @@ DEVICE_PRESERVE_KEYS = (
     "samp_rate",
     "center_freq",
 )
+# Access-mode fields (USB vs rtl_tcp): always take from the preset being applied.
+DEVICE_PRESET_FORCE_KEYS = ("type", "remote")
 
 
 def find_existing_device(existing_sdrs: dict, key: str, preset_dev: dict) -> Optional[dict]:
@@ -151,6 +153,11 @@ def merge_device(preset_dev: dict, existing_dev: Optional[dict], replace_device:
     for k in DEVICE_PRESERVE_KEYS:
         if k in existing_dev:
             entry[k] = existing_dev[k]
+    for k in DEVICE_PRESET_FORCE_KEYS:
+        if k in preset_dev:
+            entry[k] = preset_dev[k]
+        elif k == "remote":
+            entry.pop("remote", None)
     # Profiles always come from the (filtered) preset
     entry["profiles"] = profiles
     clean_scheduler(entry, set(profiles.keys()))

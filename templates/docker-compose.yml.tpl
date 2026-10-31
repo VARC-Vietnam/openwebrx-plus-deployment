@@ -18,8 +18,14 @@ services:
       # FORWARD_LOCALPORT_1234: 5678
       # HEALTHCHECK_USB_0BDA_2838: 1
       # HEALTHCHECK_SDR_DEVICES: 1
-    devices:
-      - /dev/bus/usb:/dev/bus/usb
+    # USB mode only:
+    # devices:
+    #   - /dev/bus/usb:/dev/bus/usb
+    # privileged: true
+    # rtl_tcp client mode (no USB):
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+    # privileged: false
     volumes:
       - ${OWRX_DATA_DIR}/etc:/etc/openwebrx
       - ${OWRX_DATA_DIR}/var:/var/lib/openwebrx
