@@ -99,6 +99,7 @@ info "Removes: containers, images, Compose files, Docker packages"
 info "Keeps:   /etc/modprobe.d/owrx-blacklist.conf"
 info "         /etc/udev/rules.d/99-sdr-devices.rules"
 info "         plugdev group membership"
+info "Optional: stop/remove managed owrx-rtl-tcp systemd unit"
 echo
 
 # Load deploy config if present
@@ -277,8 +278,24 @@ else
 fi
 echo
 
+# ---------- managed rtl_tcp ----------
+bold "6) Managed rtl_tcp host service"
+if [[ -f /etc/systemd/system/owrx-rtl-tcp.service ]] || systemctl list-unit-files owrx-rtl-tcp.service 2>/dev/null | grep -q owrx-rtl-tcp; then
+  if confirm "Stop and remove owrx-rtl-tcp systemd unit?" y; then
+    sudo systemctl disable --now owrx-rtl-tcp.service 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/owrx-rtl-tcp.service /etc/default/owrx-rtl-tcp
+    sudo systemctl daemon-reload
+    ok "Removed owrx-rtl-tcp service"
+  else
+    ok "Kept owrx-rtl-tcp service"
+  fi
+else
+  info "No owrx-rtl-tcp unit found."
+fi
+echo
+
 # ---------- confirm kept host files ----------
-bold "6) Host SDR settings (kept)"
+bold "7) Host SDR settings (kept)"
 if [[ -f /etc/modprobe.d/owrx-blacklist.conf ]]; then
   ok "Kept blacklist: /etc/modprobe.d/owrx-blacklist.conf"
 else

@@ -25,12 +25,18 @@ echo "  Device:   ${OWRX_DEVICE}"
 echo "  Port:     ${OWRX_PORT}"
 echo "  Data:     ${OWRX_DATA_DIR}"
 echo "  USB bind: ${BIND_USB:-true}"
-if [[ "${RTL_TCP_CLIENT:-false}" == true ]]; then
-  echo "  rtl_tcp:  client → ${RTL_TCP_REMOTE:-?}"
+if [[ "${RTL_TCP_MANAGED:-false}" == true || "${RTL_TCP_CLIENT:-false}" == true ]]; then
+  echo "  rtl_tcp:  ${RTL_TCP_REMOTE:-?}  managed=${RTL_TCP_MANAGED:-false}"
 elif [[ "${ENABLE_RTL_TCP:-false}" == true ]]; then
   echo "  rtl_tcp:  publish ${FORWARD_LOCALPORT_INTERNAL:-?}→${FORWARD_RTL_TCP_EXTERNAL:-?}"
 else
   echo "  rtl_tcp:  off"
+fi
+if [[ "${RTL_TCP_MANAGED:-false}" == true ]]; then
+  echo
+  echo "=== owrx-rtl-tcp (host) ==="
+  systemctl is-active owrx-rtl-tcp 2>/dev/null || echo "  (inactive / not installed)"
+  systemctl status owrx-rtl-tcp --no-pager -l 2>/dev/null | head -12 || true
 fi
 echo
 echo "=== USB (host) ==="

@@ -38,20 +38,20 @@ Sign in with the admin user/password you set in the installer.
 
 ## What `install.sh` does
 
-1. Detects an existing install (`.env`, compose, data dir, container) and offers:
-   - **Keep config** — pull & restart only
-   - **Reconfigure** — full prompts again
-   - **Select profiles only** — checkbox UI, apply profile changes (nothing else)
-   - **Abort**
-   Shortcut: `./install.sh --profiles`
+1. Main menu:
+   1. **Configure** — fresh install / reconfigure (`--configure`)
+   2. **Restart** — pull latest image & restart existing instance (`--restart`)
+   3. **Select active profiles** (`--profiles`)
+   4. **Select background decoding mode** (`--services`)
+   5. **Abort**
 2. Verifies Debian host; offers apt install of Docker / `usbutils`
 3. Adds your user to `docker` + `plugdev` (skips if already a member)
 4. Scans USB for RTL-SDR / RX-888
 5. Prompts: device, image (standard/SoftMBE), admin, TZ, port, data dir
 6. RTL-SDR access mode:
    - **USB** — mount `/dev/bus/usb`, device type `rtl_sdr` (optional IQ tap publish)
-   - **rtl_tcp** — no USB mount; device type `rtl_tcp` → `host:port` (LAN or `host.docker.internal`)
-7. Installs blacklist + udev only for USB mode (skipped for rtl_tcp client)
+   - **rtl_tcp (managed)** — installs `rtl-sdr` if needed, runs systemd `owrx-rtl-tcp` (default port 1234, prompt to change), OpenWebRX type `rtl_tcp` → `host.docker.internal:<port>` (no USB in Docker)
+7. Installs blacklist + udev for USB or managed rtl_tcp (dongle is on this host)
 8. Writes `.env` + `docker-compose.yml`, seeds profiles, starts Compose
 
 ## Helper scripts
@@ -81,15 +81,14 @@ Stops containers, removes OpenWebRX+/autoheal images, deletes generated `.env` /
 
 Two access modes (chosen at install):
 
-| Mode | OpenWebRX type | Docker | When to use |
-|------|----------------|--------|-------------|
-| USB | `rtl_sdr` | mounts `/dev/bus/usb` | Dongle plugged into this host |
-| rtl_tcp client | `rtl_tcp` | no USB; `remote: host:port` | `rtl_tcp` on this host or another LAN machine |
+| Mode | OpenWebRX type | Docker | Host |
+|------|----------------|--------|------|
+| USB | `rtl_sdr` | mounts `/dev/bus/usb` | blacklist/udev for Docker |
+| rtl_tcp managed | `rtl_tcp` → `host.docker.internal:PORT` | no USB mount | installs `rtl-sdr`, systemd `owrx-rtl-tcp` |
 
 - USB IDs: `0bda:2832`, `0bda:2838`, …
-- USB mode: host DVB drivers blacklisted so Docker can claim the stick
 - USB mode optional IQ tap: publish `FORWARD_LOCALPORT_…` for external clients
-- rtl_tcp client: start server elsewhere, e.g. `rtl_tcp -a 0.0.0.0 -p 1234`; from the container use `host.docker.internal:1234` (same host) or `192.168.x.x:1234` (LAN)
+- Managed rtl_tcp: `systemctl status owrx-rtl-tcp` · config `/etc/default/owrx-rtl-tcp`
 - Profiles: `presets/rtl_sdr/sdrs.json` — HAMVN 2m/70cm, HF 10/20/40 (LSB/USB + FT8/FT4), ISS voice/SSTV/FM/APRS
 
 ### RX-888

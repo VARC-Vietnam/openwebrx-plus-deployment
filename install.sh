@@ -354,22 +354,26 @@ detect_existing_install() {
   fi
 }
 
-# ---------- already configured? ----------
-INSTALL_MODE="fresh"   # fresh | keep | reconfigure | profiles | services
-# CLI shortcuts
+# ---------- main menu ----------
+INSTALL_MODE=""   # configure | keep | profiles | services
+# CLI shortcuts skip the interactive menu
 if [[ "${1:-}" == "--profiles" || "${1:-}" == "-p" ]]; then
   INSTALL_MODE="profiles"
 elif [[ "${1:-}" == "--services" || "${1:-}" == "-s" ]]; then
   INSTALL_MODE="services"
+elif [[ "${1:-}" == "--configure" || "${1:-}" == "-c" ]]; then
+  INSTALL_MODE="configure"
+elif [[ "${1:-}" == "--restart" || "${1:-}" == "-r" ]]; then
+  INSTALL_MODE="keep"
 elif [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   cat <<EOF
 Usage: ./install.sh [option]
 
-  (no args)     Interactive install / manage existing deploy
-  --profiles    Select profiles + background decoders (checkbox UI)
-  -p            Same as --profiles
-  --services    Background decoders only (checkbox UI)
-  -s            Same as --services
+  (no args)       Interactive main menu
+  --configure,-c  Fresh install / reconfigure
+  --restart,-r    Pull latest image & restart existing instance
+  --profiles,-p   Select active profiles
+  --services,-s   Select background decoding mode
 EOF
   exit 0
 fi
@@ -385,38 +389,46 @@ if [[ -f "$ROOT/.env" ]]; then
   set +a
 fi
 
-if [[ "$INSTALL_MODE" == "fresh" && "$EXISTING" == true ]]; then
-  step "0" "Existing installation"
+if [[ -z "$INSTALL_MODE" ]]; then
+  step "0" "OpenWebRX+ deployment"
   info "Repo: ${ROOT}"
   echo
-  for r in "${EXISTING_REASONS[@]}"; do
-    echo "  • $r"
-  done
-  echo
-  if [[ -f "$ROOT/.env" ]]; then
-    echo "  Container:  ${OWRX_CONTAINER_NAME:-openwebrxplus}"
-    echo "  Device:     ${OWRX_DEVICE:-unknown}"
-    echo "  Image:      ${OWRX_IMAGE:-unknown}"
-    echo "  Port:       ${OWRX_PORT:-8073}"
-    echo "  Data:       ${OWRX_DATA_DIR:-/opt/owrx-docker}"
-    echo "  Admin:      ${OPENWEBRX_ADMIN_USER:-admin}"
+  if [[ "$EXISTING" == true ]]; then
+    info "Detected existing install:"
+    for r in "${EXISTING_REASONS[@]}"; do
+      echo "  • $r"
+    done
+    echo
+    if [[ -f "$ROOT/.env" ]]; then
+      echo "  Container:  ${OWRX_CONTAINER_NAME:-openwebrxplus}"
+      echo "  Device:     ${OWRX_DEVICE:-unknown}"
+      echo "  Image:      ${OWRX_IMAGE:-unknown}"
+      echo "  Port:       ${OWRX_PORT:-8073}"
+      echo "  Data:       ${OWRX_DATA_DIR:-/opt/owrx-docker}"
+      echo "  Admin:      ${OPENWEBRX_ADMIN_USER:-admin}"
+      echo
+    fi
+  else
+    info "No existing install detected — choose (1) for a fresh setup."
     echo
   fi
-  echo "  1) Keep config — pull image & (re)start only"
-  echo "  2) Reconfigure — run full installer prompts again"
-  echo "  3) Select profiles only — checkbox which profiles stay available"
-  echo "  4) Background decoders only — checkbox (FT8, Sonde RS41, …)"
+  echo "  1) Configure new OpenWebRX+ instance (fresh install / reconfigure)"
+  echo "  2) Restart using existing OpenWebRX instance (pull latest version)"
+  echo "  3) Select active profiles"
+  echo "  4) Select background decoding mode"
   echo "  5) Abort"
-  EXISTING_CHOICE=""
-  while [[ -z "$EXISTING_CHOICE" ]]; do
-    prompt EXISTING_CHOICE "Choose [1-5]" "3"
-    case "$EXISTING_CHOICE" in
-      1) INSTALL_MODE="keep" ;;
-      2) INSTALL_MODE="reconfigure" ;;
+  MENU_DEFAULT="1"
+  [[ "$EXISTING" == true ]] && MENU_DEFAULT="3"
+  MENU_CHOICE=""
+  while [[ -z "$MENU_CHOICE" ]]; do
+    prompt MENU_CHOICE "Choose [1-5]" "$MENU_DEFAULT"
+    case "$MENU_CHOICE" in
+      1) INSTALL_MODE="configure" ;;
+      2) INSTALL_MODE="keep" ;;
       3) INSTALL_MODE="profiles" ;;
       4) INSTALL_MODE="services" ;;
       5) warn "Aborted."; exit 0 ;;
-      *) EXISTING_CHOICE=""; warn "Invalid choice." ;;
+      *) MENU_CHOICE=""; warn "Invalid choice." ;;
     esac
   done
 fi
@@ -671,7 +683,7 @@ run_profiles_only() {
     if [[ "$ENABLE_MQTT" == true ]]; then
       # Ensure mosquitto service exists in compose (inject if missing)
       if ! grep -q 'container_name:.*mosquitto\|image: eclipse-mosquitto' "$ROOT/docker-compose.yml"; then
-        warn "Mosquitto not in docker-compose.yml — re-run install option 2 (reconfigure) to add it, or start an external broker."
+        warn "Mosquitto not in docker-compose.yml — re-run install option 1 (configure) to add it, or start an external broker."
       fi
       run_quiet "Reloading OpenWebRX+ (+ MQTT if configured)" "Container reloaded" \
         $compose_bin up -d --force-recreate --quiet-pull
@@ -753,17 +765,17 @@ if [[ "$INSTALL_MODE" == "services" ]]; then
   exit $?
 fi
 
-# ---------- keep-config fast path ----------
+# ---------- restart / pull latest fast path ----------
 if [[ "$INSTALL_MODE" == "keep" ]]; then
-  step "…" "Keep config — pull & start"
+  step "…" "Restart existing instance — pull latest & start"
   if [[ ! -f "$ROOT/.env" || ! -f "$ROOT/docker-compose.yml" ]]; then
-    err "Missing .env or docker-compose.yml — choose reconfigure (2)."
+    err "Missing .env or docker-compose.yml — choose option 1 (configure) first."
     exit 1
   fi
   # shellcheck disable=SC1091
   set -a; source "$ROOT/.env"; set +a
   if ! command -v docker >/dev/null 2>&1; then
-    err "Docker not installed. Choose reconfigure or install Docker first."
+    err "Docker not installed. Choose option 1 (configure) first."
     exit 1
   fi
   DOCKER="docker"
@@ -967,30 +979,87 @@ if [[ "${OWRX_DATA_DIR}" != /* ]]; then
 fi
 echo
 
-# ---------- SDR access: USB vs rtl_tcp client ----------
+# ---------- SDR access: USB vs managed rtl_tcp ----------
 ENABLE_RTL_TCP=false
 RTL_TCP_CLIENT=false
+RTL_TCP_MANAGED=false
 RTL_TCP_REMOTE=""
+RTL_TCP_REMOTE_PORT="1234"
 BIND_USB=true
 FORWARD_LOCALPORT_INTERNAL=""
 FORWARD_RTL_TCP_EXTERNAL=""
 EXTRA_PORTS=""
 EXTRA_ENV=""
 EXTRA_HOSTS=""
+INSTALL_RTL_TCP_SVC=false
+
+ensure_rtl_tcp_binary() {
+  if command -v rtl_tcp >/dev/null 2>&1; then
+    ok "rtl_tcp found: $(command -v rtl_tcp)"
+    return 0
+  fi
+  if ! is_debian_like; then
+    err "rtl_tcp not found and this is not Debian/Ubuntu — install rtl-sdr manually."
+    return 1
+  fi
+  info "rtl_tcp missing — installing package rtl-sdr…"
+  apt_update_quiet || true
+  if pkg_available rtl-sdr; then
+    apt_install_quiet rtl-sdr || return 1
+  else
+    err "Package rtl-sdr not available in apt."
+    return 1
+  fi
+  if ! command -v rtl_tcp >/dev/null 2>&1; then
+    err "rtl_tcp still missing after installing rtl-sdr."
+    return 1
+  fi
+  ok "Installed rtl_tcp: $(command -v rtl_tcp)"
+}
+
+install_managed_rtl_tcp_service() {
+  local port="$1"
+  local unit_src="${ROOT}/host/owrx-rtl-tcp.service"
+  local default_src="${ROOT}/host/owrx-rtl-tcp.default"
+  [[ -f "$unit_src" ]] || { err "Missing ${unit_src}"; return 1; }
+  ensure_sudo || return 1
+
+  # Prefer blacklisted DVB modules so rtl_tcp can claim the stick
+  for mod in dvb_usb_rtl28xxu dvb_usb_rtl2832u rtl2832 rtl2830 rtl8xxxu; do
+    sudo modprobe -r "$mod" 2>/dev/null || true
+  done
+
+  sudo tee /etc/default/owrx-rtl-tcp >/dev/null <<EOF
+# Managed by openwebrx-plus-deployment install.sh
+RTL_TCP_LISTEN=0.0.0.0
+RTL_TCP_PORT=${port}
+EOF
+  sudo cp "$unit_src" /etc/systemd/system/owrx-rtl-tcp.service
+  # If template default exists, keep as reference only — live config is /etc/default/owrx-rtl-tcp
+  [[ -f "$default_src" ]] || true
+
+  sudo systemctl daemon-reload
+  sudo systemctl enable owrx-rtl-tcp.service
+  sudo systemctl restart owrx-rtl-tcp.service
+  sleep 1
+  if sudo systemctl is-active --quiet owrx-rtl-tcp.service; then
+    ok "rtl_tcp service active on 0.0.0.0:${port}"
+  else
+    warn "rtl_tcp service not active yet — check: sudo journalctl -u owrx-rtl-tcp -n 40"
+    sudo systemctl status owrx-rtl-tcp.service --no-pager -l || true
+  fi
+}
 
 step "8/12" "Device binding / rtl_tcp"
 echo
 
 if [[ "$OWRX_DEVICE" == "rtl_sdr" ]]; then
   info "How should OpenWebRX reach the RTL-SDR?"
-  echo "  1) USB on this Docker host     — mount /dev/bus/usb (type rtl_sdr)"
-  echo "  2) Network rtl_tcp server      — connect to host:port (type rtl_tcp, no USB mount)"
-  echo
-  echo "  Mode 2 is for rtl_tcp on this machine or another LAN host you can reach"
-  echo "  (e.g. rtl_tcp -a 0.0.0.0 -p 1234). OpenWebRX will use device type rtl_tcp."
+  echo "  1) USB in Docker              — mount /dev/bus/usb (type rtl_sdr)"
+  echo "  2) rtl_tcp on this host       — install/run rtl_tcp, OpenWebRX type rtl_tcp (no USB in Docker)"
   echo
   RTL_ACCESS_DEFAULT="1"
-  [[ "${RTL_TCP_CLIENT:-}" == "true" ]] && RTL_ACCESS_DEFAULT="2"
+  [[ "${RTL_TCP_CLIENT:-}" == "true" || "${RTL_TCP_MANAGED:-}" == "true" ]] && RTL_ACCESS_DEFAULT="2"
   RTL_ACCESS=""
   while [[ -z "$RTL_ACCESS" ]]; do
     prompt RTL_ACCESS "Choose access mode [1-2]" "$RTL_ACCESS_DEFAULT"
@@ -1002,25 +1071,30 @@ if [[ "$OWRX_DEVICE" == "rtl_sdr" ]]; then
 
   if [[ "$RTL_ACCESS" == "2" ]]; then
     RTL_TCP_CLIENT=true
+    RTL_TCP_MANAGED=true
     BIND_USB=false
     ENABLE_RTL_TCP=false
-    info "rtl_tcp endpoint (from inside the OpenWebRX container):"
-    echo "  • Same Docker host: use host.docker.internal (added via extra_hosts)"
-    echo "  • Other LAN machine: use that host's IP, e.g. 192.168.1.50"
+    INSTALL_RTL_TCP_SVC=true
+    info "Managed rtl_tcp: installer will check/install rtl-sdr, run a systemd unit,"
+    info "and point OpenWebRX at host.docker.internal:<port> (no /dev/bus/usb in Compose)."
     echo
-    prompt RTL_TCP_REMOTE_HOST "rtl_tcp host" "${RTL_TCP_REMOTE_HOST:-host.docker.internal}"
-    prompt RTL_TCP_REMOTE_PORT "rtl_tcp port" "${RTL_TCP_REMOTE_PORT:-1234}"
-    RTL_TCP_REMOTE="${RTL_TCP_REMOTE_HOST}:${RTL_TCP_REMOTE_PORT}"
+    prompt RTL_TCP_REMOTE_PORT "rtl_tcp listen port" "${RTL_TCP_REMOTE_PORT:-1234}"
+    if ! [[ "$RTL_TCP_REMOTE_PORT" =~ ^[0-9]+$ ]] || (( RTL_TCP_REMOTE_PORT < 1 || RTL_TCP_REMOTE_PORT > 65535 )); then
+      err "Invalid port: ${RTL_TCP_REMOTE_PORT}"
+      exit 1
+    fi
+    RTL_TCP_REMOTE="host.docker.internal:${RTL_TCP_REMOTE_PORT}"
     EXTRA_HOSTS="    extra_hosts:
       - \"host.docker.internal:host-gateway\""
-    ok "OpenWebRX device type rtl_tcp → ${RTL_TCP_REMOTE} (USB mount disabled)"
+    ok "Will bind OpenWebRX rtl_tcp → ${RTL_TCP_REMOTE}"
   else
     BIND_USB=true
     RTL_TCP_CLIENT=false
+    RTL_TCP_MANAGED=false
     RTL_TCP_REMOTE=""
     info "USB mode: /dev/bus/usb will be bound into the container."
     echo "  Optional: also publish an rtl_tcp-compatible IQ tap (FORWARD_LOCALPORT)"
-    echo "  for external clients — this is not the same as connecting *to* rtl_tcp."
+    echo "  for external clients — this is not the same as managed rtl_tcp mode."
     echo
     if confirm "Also expose rtl_tcp-compatible port from the container?" n; then
       ENABLE_RTL_TCP=true
@@ -1097,20 +1171,23 @@ echo
 step "10/12" "Host preparation (blacklist + udev)"
 DO_BLACKLIST=false
 DO_UDEV=false
-if [[ "$BIND_USB" != true ]]; then
-  ok "Skipping blacklist/udev prompts (rtl_tcp client — stick is not on this Docker host)."
-elif [[ -f /etc/modprobe.d/owrx-blacklist.conf ]]; then
-  ok "Blacklist already installed — keeping"
-  if [[ -f /etc/udev/rules.d/99-sdr-devices.rules ]]; then
-    ok "Udev rules already installed — keeping"
-  else
-    if confirm "Install udev rules for SDR USB permissions? (recommended)" y; then
-      DO_UDEV=true
-    fi
-  fi
+# USB-in-Docker OR managed host rtl_tcp both need the stick free of DVB drivers.
+NEED_HOST_SDR_PREP=false
+if [[ "$BIND_USB" == true || "$RTL_TCP_MANAGED" == true ]]; then
+  NEED_HOST_SDR_PREP=true
+fi
+if [[ "$NEED_HOST_SDR_PREP" != true ]]; then
+  ok "Skipping blacklist/udev (no local USB SDR for this install mode)."
 else
-  if confirm "Install kernel module blacklist for SDR drivers? (recommended)" y; then
-    DO_BLACKLIST=true
+  if [[ "$RTL_TCP_MANAGED" == true ]]; then
+    info "Managed rtl_tcp still needs blacklist/udev so the host can open the dongle."
+  fi
+  if [[ -f /etc/modprobe.d/owrx-blacklist.conf ]]; then
+    ok "Blacklist already installed — keeping"
+  else
+    if confirm "Install kernel module blacklist for SDR drivers? (recommended)" y; then
+      DO_BLACKLIST=true
+    fi
   fi
   if [[ -f /etc/udev/rules.d/99-sdr-devices.rules ]]; then
     ok "Udev rules already installed — keeping"
@@ -1125,14 +1202,19 @@ sleep 0.6
 # ---------- summary ----------
 step "11/12" "Summary"
 RTL_SUMMARY="off"
-if [[ "$RTL_TCP_CLIENT" == true ]]; then
+if [[ "$RTL_TCP_MANAGED" == true ]]; then
+  RTL_SUMMARY="managed host service → ${RTL_TCP_REMOTE}"
+elif [[ "$RTL_TCP_CLIENT" == true ]]; then
   RTL_SUMMARY="client → ${RTL_TCP_REMOTE} (no USB mount)"
 elif [[ "$ENABLE_RTL_TCP" == true ]]; then
   RTL_SUMMARY="publish ${FORWARD_LOCALPORT_INTERNAL}→${FORWARD_RTL_TCP_EXTERNAL}"
 fi
+ACCESS_SUMMARY="USB mount"
+[[ "$BIND_USB" != true && "$RTL_TCP_MANAGED" == true ]] && ACCESS_SUMMARY="rtl_tcp (managed on host)"
+[[ "$BIND_USB" != true && "$RTL_TCP_MANAGED" != true ]] && ACCESS_SUMMARY="rtl_tcp client"
 cat <<EOF
   Device:        ${DEVICE_LABEL} (${OWRX_DEVICE})
-  Access:        $([ "$BIND_USB" = true ] && echo "USB mount" || echo "rtl_tcp client")
+  Access:        ${ACCESS_SUMMARY}
   Image:         ${OWRX_IMAGE}
   Container:     ${OWRX_CONTAINER_NAME}
   Web port:      ${OWRX_PORT}
@@ -1235,6 +1317,7 @@ label=${DEVICE_LABEL}
 image=${OWRX_IMAGE}
 bind_usb=${BIND_USB}
 rtl_tcp_client=${RTL_TCP_CLIENT}
+rtl_tcp_managed=${RTL_TCP_MANAGED}
 rtl_tcp_remote=${RTL_TCP_REMOTE}
 generated=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
@@ -1252,7 +1335,9 @@ OWRX_DATA_DIR=${OWRX_DATA_DIR}
 OWRX_DEVICE=${OWRX_DEVICE}
 BIND_USB=${BIND_USB}
 RTL_TCP_CLIENT=${RTL_TCP_CLIENT}
+RTL_TCP_MANAGED=${RTL_TCP_MANAGED}
 RTL_TCP_REMOTE=${RTL_TCP_REMOTE}
+RTL_TCP_REMOTE_PORT=${RTL_TCP_REMOTE_PORT}
 ENABLE_RTL_TCP=${ENABLE_RTL_TCP}
 FORWARD_LOCALPORT_INTERNAL=${FORWARD_LOCALPORT_INTERNAL}
 FORWARD_RTL_TCP_EXTERNAL=${FORWARD_RTL_TCP_EXTERNAL}
@@ -1388,6 +1473,14 @@ if [[ "$DO_UDEV" == true ]]; then
 fi
 echo
 
+# ---------- managed rtl_tcp on host ----------
+if [[ "$INSTALL_RTL_TCP_SVC" == true ]]; then
+  bold "Installing managed rtl_tcp host service..."
+  ensure_rtl_tcp_binary || exit 1
+  install_managed_rtl_tcp_service "$RTL_TCP_REMOTE_PORT" || exit 1
+  echo
+fi
+
 # ---------- pull & start ----------
 step "12/12" "Pull image & start container"
 COMPOSE="${COMPOSE:-docker compose}"
@@ -1421,9 +1514,12 @@ if confirm "Pull image and start OpenWebRX+ now?" y; then
   echo
   bold "Next"
   echo "  Profiles: HAMVN / HF FT8-FT4 / ISS only (no Airspy+, no SDRPlay)"
-  if [[ "$RTL_TCP_CLIENT" == true ]]; then
+  if [[ "$RTL_TCP_MANAGED" == true ]]; then
+    echo "  Host rtl_tcp: systemctl status owrx-rtl-tcp"
+    echo "  OpenWebRX → ${RTL_TCP_REMOTE}"
+    echo "  Logs: journalctl -u owrx-rtl-tcp -f"
+  elif [[ "$RTL_TCP_CLIENT" == true ]]; then
     echo "  OpenWebRX connects to rtl_tcp at ${RTL_TCP_REMOTE}"
-    echo "  Ensure the server is listening, e.g.: rtl_tcp -a 0.0.0.0 -p ${RTL_TCP_REMOTE##*:}"
   elif [[ "$OWRX_DEVICE" == "rtl_sdr" && "$ENABLE_RTL_TCP" == true ]]; then
     echo "  rtl_tcp publish: host ${FORWARD_RTL_TCP_EXTERNAL} (internal ${FORWARD_LOCALPORT_INTERNAL})"
   fi
@@ -1432,6 +1528,9 @@ if confirm "Pull image and start OpenWebRX+ now?" y; then
   fi
 else
   ok "Config written. Start later: ./scripts/start.sh"
+  if [[ "$INSTALL_RTL_TCP_SVC" == true ]]; then
+    info "rtl_tcp service was already installed/started above."
+  fi
 fi
 
 echo

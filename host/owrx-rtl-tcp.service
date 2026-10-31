@@ -1,0 +1,18 @@
+[Unit]
+Description=rtl_tcp SDR IQ server (OpenWebRX+)
+Documentation=man:rtl_tcp(1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/owrx-rtl-tcp
+# Shell so EnvironmentFile vars expand; listen on all interfaces for Docker/LAN.
+ExecStart=/bin/sh -c 'exec /usr/bin/rtl_tcp -a $${RTL_TCP_LISTEN:-0.0.0.0} -p $${RTL_TCP_PORT:-1234}'
+Restart=on-failure
+RestartSec=3
+# USB SDR access (pair with host/99-sdr-devices.rules + blacklist)
+SupplementaryGroups=plugdev
+
+[Install]
+WantedBy=multi-user.target
