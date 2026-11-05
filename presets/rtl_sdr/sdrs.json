@@ -286,6 +286,26 @@
         "tuning_step": 10000,
         "rf_gain": 49.6,
         "direct_sampling": 0
+      },
+      "uvb76": {
+        "name": "UVB-76 / The Buzzer",
+        "center_freq": 4625000,
+        "samp_rate": 2400000,
+        "start_freq": 4625000,
+        "start_mod": "usb",
+        "tuning_step": 100,
+        "rf_gain": 49.6,
+        "direct_sampling": 2
+      },
+      "adsb_1090": {
+        "name": "ADS-B 1090 MHz",
+        "center_freq": 1090000000,
+        "samp_rate": 2400000,
+        "start_freq": 1090000000,
+        "start_mod": "adsb",
+        "tuning_step": 1000,
+        "rf_gain": 49.6,
+        "direct_sampling": 0
       }
     }
   }
