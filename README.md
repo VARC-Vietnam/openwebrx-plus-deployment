@@ -89,7 +89,7 @@ Two access modes (chosen at install):
 - USB IDs: `0bda:2832`, `0bda:2838`, …
 - USB mode optional IQ tap: publish `FORWARD_LOCALPORT_…` for external clients
 - Managed rtl_tcp: `systemctl status owrx-rtl-tcp` · config `/etc/default/owrx-rtl-tcp`
-- Profiles: `presets/rtl_sdr/sdrs.json` — HAMVN 2m/70cm, HF 10/20/40 (LSB/USB + FT8/FT4), ISS voice/SSTV/FM/APRS
+- Profiles: `presets/rtl_sdr/sdrs.json` — HAMVN 2m/70cm, HF 10/20/40 (LSB/USB + FT8/FT4), ISS voice/SSTV/FM/APRS, UVB-76 / The Buzzer (4.625 MHz USB), ADS-B (1090 MHz; requires the ADS-B feature)
 
 ### RX-888
 
